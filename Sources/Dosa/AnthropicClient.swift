@@ -23,6 +23,7 @@ struct AnthropicClient {
         case http(Int, String)
         case malformedResponse(String)
         case refused(String)
+        case truncated(String)
 
         var errorDescription: String? {
             switch self {
@@ -34,12 +35,15 @@ struct AnthropicClient {
                 return "Anthropic returned an unexpected response."
             case .refused:
                 return "Claude declined to generate notes for this recording."
+            case .truncated:
+                return "Claude ran out of room before writing any notes — the meeting may be too long for this model. Try claude-haiku-4-5 in Settings → LLM Provider → Anthropic, which spends less of its budget on reasoning."
             }
         }
 
         var errorDetail: String? {
             switch self {
-            case .http(_, let body), .malformedResponse(let body), .refused(let body):
+            case .http(_, let body), .malformedResponse(let body),
+                 .refused(let body), .truncated(let body):
                 return body.isEmpty ? nil : String(body.prefix(4000))
             }
         }
@@ -77,11 +81,23 @@ struct AnthropicClient {
             throw AnthropicError.refused(rawBody)
         }
 
+        // Only the text blocks: Sonnet 5 and Opus 5 think adaptively by
+        // default and prepend a `thinking` block (empty-texted, since
+        // `display` defaults to omitted), which must not land in the notes.
         let text = content
             .filter { $0["type"] as? String == "text" }
             .compactMap { $0["text"] as? String }
             .joined()
-        guard !text.isEmpty else { throw AnthropicError.malformedResponse(rawBody) }
+
+        guard !text.isEmpty else {
+            // Thinking shares the max_tokens budget on the thinking models, so
+            // a long enough meeting can exhaust it before any notes are
+            // written. That's a distinct failure from a malformed payload.
+            if json["stop_reason"] as? String == "max_tokens" {
+                throw AnthropicError.truncated(rawBody)
+            }
+            throw AnthropicError.malformedResponse(rawBody)
+        }
         return text
     }
 
