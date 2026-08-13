@@ -12,6 +12,7 @@ struct SidebarView: View {
     @State private var showNewFolderAlert = false
     @State private var confirmEmptyTrash = false
     @State private var pendingDeleteIds: Set<UUID> = []
+    @State private var deletedNotesExpanded = false
 
     @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
     @AppStorage(AppSettings.modelKey) private var geminiModel = AppSettings.defaultModel
@@ -172,7 +173,7 @@ struct SidebarView: View {
             }
 
             Section {
-                DisclosureGroup {
+                DisclosureGroup(isExpanded: $deletedNotesExpanded) {
                     ForEach(store.deletedNotes) { note in
                         DeletedNoteRow(note: note, selectedNoteIds: $selectedNoteIds)
                     }
@@ -192,6 +193,10 @@ struct SidebarView: View {
                 } label: {
                     Label("Deleted Notes", systemImage: "trash")
                         .font(.system(size: 14))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            deletedNotesExpanded.toggle()
+                        }
                 }
             } footer: {
                 if !store.deletedNotes.isEmpty {
@@ -262,9 +267,10 @@ private struct FolderRow: View {
     let onRequestDelete: (Set<UUID>) -> Void
 
     @State private var isDropTargeted = false
+    @State private var isExpanded = false
 
     var body: some View {
-        DisclosureGroup {
+        DisclosureGroup(isExpanded: $isExpanded) {
             ForEach(store.subfolders(of: folder.id)) { subfolder in
                 FolderRow(
                     folder: subfolder,
@@ -291,6 +297,10 @@ private struct FolderRow: View {
                 )
                 .onDrop(of: [.plainText], isTargeted: $isDropTargeted) { providers in
                     handleDrop(providers)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isExpanded.toggle()
                 }
                 .contextMenu {
                     Button("New Note in \"\(folder.name)\"") {
