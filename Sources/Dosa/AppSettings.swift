@@ -39,8 +39,76 @@ enum AppSettings {
     }
     static let apiKeyKey = "geminiAPIKey"
     static let modelKey = "geminiModel"
+    static let llmProviderKey = "llmProvider"
+    static let deepseekAPIKeyKey = "deepseekAPIKey"
+    static let deepseekModelKey = "deepseekModel"
     static let notesPromptKey = "notesPromptTemplate"
     static let transcriptPromptKey = "transcriptPromptTemplate"
+
+    /// Providers with a working integration; anything else stored under
+    /// `llmProviderKey` (e.g. a "coming soon" tab) resolves to Gemini.
+    static let supportedProviders = ["Gemini", "DeepSeek"]
+
+    static var currentProvider: String {
+        let stored = UserDefaults.standard.string(forKey: llmProviderKey) ?? "Gemini"
+        return supportedProviders.contains(stored) ? stored : "Gemini"
+    }
+
+    static let transcriptionEngineKey = "transcriptionEngine"
+
+    enum TranscriptionEngine: String, CaseIterable {
+        case gemini
+        case appleAdvanced
+        case appleBasic
+
+        var displayName: String {
+            switch self {
+            case .gemini: return "Gemini (Cloud)"
+            case .appleAdvanced: return "On-Device (Advanced)"
+            case .appleBasic: return "On-Device (Basic)"
+            }
+        }
+    }
+
+    static var currentTranscriptionEngine: TranscriptionEngine {
+        TranscriptionEngine(rawValue: UserDefaults.standard.string(forKey: transcriptionEngineKey) ?? "") ?? .gemini
+    }
+
+    /// The engine that will actually run: Advanced silently degrades to Basic
+    /// on Macs where the macOS 26 SpeechAnalyzer API isn't available.
+    static var resolvedTranscriptionEngine: TranscriptionEngine {
+        let engine = currentTranscriptionEngine
+        if engine == .appleAdvanced && !AppleTranscriber.advancedAvailable { return .appleBasic }
+        return engine
+    }
+
+    /// Providers with an API key saved — the only valid choices for the
+    /// Default Provider picker in Settings.
+    static var configuredProviders: [String] {
+        supportedProviders.filter { provider in
+            let keyKey = provider == "DeepSeek" ? deepseekAPIKeyKey : apiKeyKey
+            return !(UserDefaults.standard.string(forKey: keyKey) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    // deepseek-v4-flash is the fast/cheap default; deepseek-v4-pro is the
+    // heavier variant — overkill for note synthesis but selectable.
+    // (Current lineup per api-docs.deepseek.com as of Aug 2026; the old
+    // deepseek-chat / deepseek-reasoner names are no longer documented.)
+    static let defaultDeepSeekModel = "deepseek-v4-flash"
+    static let availableDeepSeekModels = ["deepseek-v4-flash", "deepseek-v4-pro"]
+
+    /// Maps retired DeepSeek model names a stale stored setting might hold.
+    private static let retiredDeepSeekRemap: [String: String] = [
+        "deepseek-chat": "deepseek-v4-flash",
+        "deepseek-reasoner": "deepseek-v4-pro",
+    ]
+
+    static func resolveDeepSeekModel(_ name: String) -> String {
+        if let remapped = retiredDeepSeekRemap[name] { return remapped }
+        return availableDeepSeekModels.contains(name) ? name : defaultDeepSeekModel
+    }
 
     // gemini-3.5-flash is pinned as the default because the rolling gemini-flash-latest
     // alias (currently gemini-3.6-flash) 500s on audio input as of Aug 2026.

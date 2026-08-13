@@ -130,7 +130,11 @@ final class AudioRecorder: NSObject, ObservableObject {
         return count > 0 ? sqrt(sum / Float(count)) : 0
     }
 
-    func stop(outputURL: URL) async throws -> TimeInterval {
+    /// Stops recording and writes the mixed `.m4a` to `outputURL`. When
+    /// `micTrackURL`/`systemTrackURL` are given, each source is also kept as
+    /// its own `.m4a` — transcribing them separately is what lets on-device
+    /// transcription attribute speech to the user vs. everyone else.
+    func stop(outputURL: URL, micTrackURL: URL? = nil, systemTrackURL: URL? = nil) async throws -> TimeInterval {
         guard isRecording else { return 0 }
         let duration = startedAt.map { Date().timeIntervalSince($0) } ?? 0
 
@@ -161,6 +165,15 @@ final class AudioRecorder: NSObject, ObservableObject {
         }
 
         try await Self.mix(inputs: [micURL, systemURL], to: outputURL)
+
+        // Best-effort: a failed side track only costs speaker attribution, so
+        // it must never fail the recording itself.
+        if let micTrackURL {
+            try? await Self.mix(inputs: [micURL], to: micTrackURL)
+        }
+        if let systemTrackURL {
+            try? await Self.mix(inputs: [systemURL], to: systemTrackURL)
+        }
 
         await MainActor.run { self.recordingNoteId = nil }
         return duration

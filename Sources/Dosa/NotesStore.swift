@@ -139,9 +139,7 @@ final class NotesStore: ObservableObject {
 
     func deletePermanently(_ id: UUID) {
         guard let note = note(id: id) else { return }
-        if let url = recordingURL(for: note) {
-            try? FileManager.default.removeItem(at: url)
-        }
+        removeRecordingFiles(for: note)
         notes.removeAll { $0.id == id }
         scheduleSave()
     }
@@ -167,9 +165,41 @@ final class NotesStore: ObservableObject {
 
     // MARK: - Recordings
 
+    /// The unmixed source tracks kept alongside a recording. Transcribing them
+    /// separately is what lets on-device transcription tell the user's voice
+    /// (mic) apart from everyone else's (system audio).
+    enum RecordingTrack: String, CaseIterable {
+        case mic = "-mic"
+        case system = "-system"
+    }
+
     func recordingURL(for note: Note) -> URL? {
         guard let fileName = note.recordingFileName else { return nil }
         return recordingsDirectory.appendingPathComponent(fileName)
+    }
+
+    /// Side-track URL for a recording file name, e.g. `<id>-mic.m4a`.
+    func trackURL(forRecordingNamed fileName: String, _ track: RecordingTrack) -> URL {
+        let base = (fileName as NSString).deletingPathExtension
+        return recordingsDirectory.appendingPathComponent("\(base)\(track.rawValue).m4a")
+    }
+
+    /// Side-track URL for a note, or nil when that track wasn't kept (older
+    /// recordings made before per-track capture, or a failed export).
+    func trackURL(for note: Note, _ track: RecordingTrack) -> URL? {
+        guard let fileName = note.recordingFileName else { return nil }
+        let url = trackURL(forRecordingNamed: fileName, track)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func removeRecordingFiles(for note: Note) {
+        if let url = recordingURL(for: note) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        guard let fileName = note.recordingFileName else { return }
+        for track in RecordingTrack.allCases {
+            try? FileManager.default.removeItem(at: trackURL(forRecordingNamed: fileName, track))
+        }
     }
 
     func setRecording(noteId: UUID, fileName: String, duration: TimeInterval) {
@@ -189,9 +219,7 @@ final class NotesStore: ObservableObject {
 
     func discardRecording(_ id: UUID) {
         guard var note = note(id: id) else { return }
-        if let url = recordingURL(for: note) {
-            try? FileManager.default.removeItem(at: url)
-        }
+        removeRecordingFiles(for: note)
         note.recordingFileName = nil
         note.recordingDuration = nil
         note.transcript = nil

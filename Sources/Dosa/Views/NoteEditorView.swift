@@ -510,7 +510,11 @@ struct NoteEditorView: View {
             do {
                 let fileName = "\(noteId.uuidString).m4a"
                 let url = store.recordingsDirectory.appendingPathComponent(fileName)
-                let duration = try await recorder.stop(outputURL: url)
+                let duration = try await recorder.stop(
+                    outputURL: url,
+                    micTrackURL: store.trackURL(forRecordingNamed: fileName, .mic),
+                    systemTrackURL: store.trackURL(forRecordingNamed: fileName, .system)
+                )
                 store.setRecording(noteId: noteId, fileName: fileName, duration: duration)
             } catch {
                 localError = error.localizedDescription

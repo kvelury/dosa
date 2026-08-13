@@ -1,6 +1,6 @@
 # Dosa 🥞 — Meeting Notes for macOS
 
-Dosa is a native macOS meeting-notes app. It records meeting audio **directly from your Mac** — no bot joins your call — lets you jot sparse notes in a live markdown editor, and uses the Gemini API to turn the recording + your notes into polished, structured meeting notes. Your own words stay in the primary text color; Dosa's additions render in a configurable accent color, computed by a deterministic word-level diff.
+Dosa is a native macOS meeting-notes app. It records meeting audio **directly from your Mac** — no bot joins your call — lets you jot sparse notes in a live markdown editor, and uses your configured LLM provider (Gemini or DeepSeek) to turn the recording + your notes into polished, structured meeting notes. Your own words stay in the primary text color; Dosa's additions render in a configurable accent color, computed by a deterministic word-level diff.
 
 Because audio is intercepted at the OS level (not via meeting-platform APIs), it works with **any** source: Zoom, Google Meet, Microsoft Teams, Slack huddles, browser tabs, even video files.
 
@@ -30,7 +30,7 @@ open build/Dosa.app
 ### First-run setup
 
 1. **Permissions** — the first recording prompts for **Microphone**; system audio needs **Screen & System Audio Recording** (grant in System Settings, then relaunch Dosa). Because builds are ad-hoc signed, macOS may re-prompt after rebuilds.
-2. **Gemini API key** — Settings (bottom-left of the sidebar) → LLM Provider → paste your key ([get one free](https://ai.google.dev/gemini-api/docs/api-key)). Default model is `gemini-3.5-flash`, with an automatic fallback chain if a model errors.
+2. **LLM provider API key** — Settings (bottom-left of the sidebar) → LLM Provider → paste your key. Gemini is the default ([get a key free](https://ai.google.dev/gemini-api/docs/api-key)); default model is `gemini-3.5-flash`, with an automatic fallback chain if a model errors. DeepSeek is also supported for note generation ([get a key](https://platform.deepseek.com/api_keys); default model `deepseek-v4-flash`) — but transcription always runs on Gemini, since DeepSeek doesn't accept audio, so keep a Gemini key saved either way. With keys for multiple providers saved, the **Default Provider** picker at the top of the section chooses which one generates notes.
 3. **Your name** — Settings → Profile, so transcripts label your voice correctly.
 4. **Notion (optional)** — Settings → Notion → Connect; approve in the browser and Dosa sets up the rest.
 
@@ -62,7 +62,8 @@ Sources/Dosa/
   DosaApp / AppSettings / Theme      app entry, settings registry, theming tokens
   Models / NotesStore                data model + debounced JSON persistence
   AudioRecorder / AudioPlayer        capture (mic + ScreenCaptureKit), mixdown, playback
-  GeminiClient / GenerationManager   Gemini REST + transcribe→generate pipeline
+  GeminiClient / DeepSeekClient      REST clients for the supported LLM providers
+  GenerationManager                  transcribe→generate pipeline, provider routing
   DiffEngine / SearchService         word diff, search + reveal machinery
   Notion/                            OAuth (DCR+PKCE), minimal MCP client, export logic
   Views/                             SwiftUI + AppKit-backed markdown editor
@@ -70,8 +71,8 @@ Sources/Dosa/
 
 ## Known limitations
 
-- Transcription requires network and a Gemini API key; audio is uploaded to Google's Files API for processing.
+- Gemini (Cloud) transcription requires network and a Gemini API key, and uploads audio to Google's Files API. The on-device engines (Settings → Transcription) avoid both; because the mic and system-audio tracks are kept separately, they still tell your turns from everyone else's, but can't name individual remote participants. On-Device (Advanced) needs macOS 26+, On-Device (Basic) is dictation-grade.
 - Speaker identification is inferred by the LLM from the mixed track (not channel-separated).
 - Ad-hoc signing means permission grants can reset on rebuild.
 - Notion sync is one-way (export/update); bi-directional sync is designed but not built (see the design doc §10.4).
-- Anthropic/OpenAI provider tabs in Settings are stubs.
+- Anthropic/OpenAI provider tabs in Settings are stubs; Gemini and DeepSeek are the working providers.
