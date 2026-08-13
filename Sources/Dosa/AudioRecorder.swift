@@ -332,11 +332,35 @@ final class AudioRecorder: NSObject, ObservableObject {
         }
     }
 
+    /// How closely the exported audio has to match the length the inputs claimed.
+    enum DurationCheck {
+        /// Inputs Dosa captured itself, whose length is known exactly — any shortfall
+        /// means a truncated export and must fail loudly.
+        case strict
+        /// Imported files. Container-less streams (raw ADTS `.aac`, some `.mp3`s) only
+        /// estimate their duration from bitrate and routinely overshoot, so demand
+        /// plausible audio rather than an exact match — otherwise a perfectly good
+        /// import gets rejected for a number its own container guessed wrong.
+        case lenient
+
+        func passes(actual: TimeInterval, expected: TimeInterval) -> Bool {
+            guard actual.isFinite, actual > 0 else { return false }
+            switch self {
+            case .strict: return actual >= min(expected - 1, expected * 0.98)
+            case .lenient: return actual >= min(expected - 1, expected * 0.5)
+            }
+        }
+    }
+
     /// Mixes `inputs` into `outputURL` and returns the resulting duration. The export
     /// runs to a staging file and only replaces `outputURL` once it has succeeded, so
     /// a failed export can never destroy the recording that was already there.
     @discardableResult
-    static func mix(inputs: [URL], to outputURL: URL) async throws -> TimeInterval {
+    static func mix(
+        inputs: [URL],
+        to outputURL: URL,
+        durationCheck: DurationCheck = .strict
+    ) async throws -> TimeInterval {
         let composition = AVMutableComposition()
         var addedTrack = false
 
@@ -375,9 +399,9 @@ final class AudioRecorder: NSObject, ObservableObject {
         // actual audio disagree.
         let expected = CMTimeGetSeconds(composition.duration)
         let actual = CMTimeGetSeconds(try await AVURLAsset(url: staging).load(.duration))
-        guard actual.isFinite, actual >= min(expected - 1, expected * 0.98) else {
+        guard durationCheck.passes(actual: actual, expected: expected) else {
             throw RecorderError.exportFailed(
-                "The export produced \(TimeFormatting.clock(actual)) of audio but \(TimeFormatting.clock(expected)) was recorded. The raw capture has been kept."
+                "The export produced \(TimeFormatting.clock(actual)) of audio but \(TimeFormatting.clock(expected)) was expected. The source audio has been kept."
             )
         }
 

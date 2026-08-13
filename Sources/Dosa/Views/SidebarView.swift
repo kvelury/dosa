@@ -49,13 +49,23 @@ struct SidebarView: View {
                 }
                 .help("Search all notes and transcripts (⌘K)")
                 Spacer()
-                Button {
-                    let note = store.createNote()
-                    selectedNoteIds = [note.id]
+                Menu {
+                    Button("New Note") {
+                        let note = store.createNote()
+                        selectedNoteIds = [note.id]
+                    }
+                    Button("Import Audio or Video…") {
+                        importIntoNewNote(folderId: nil)
+                    }
                 } label: {
                     Image(systemName: "plus")
+                } primaryAction: {
+                    let note = store.createNote()
+                    selectedNoteIds = [note.id]
                 }
-                .help("New note (⌘N)")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("New note (⌘N), or use the menu to import audio or video")
             }
             .buttonStyle(.borderless)
             .font(.system(size: 16, weight: .medium))
@@ -160,6 +170,7 @@ struct SidebarView: View {
                         folder: folder,
                         selectedNoteIds: $selectedNoteIds,
                         onNewFolder: promptNewFolder,
+                        onImport: importIntoNewNote,
                         onRequestDelete: requestDelete
                     )
                 }
@@ -217,6 +228,15 @@ struct SidebarView: View {
         .background(SidebarDeselectCatcher { selectedNoteIds = [] })
     }
 
+    /// Picks a file first, so cancelling the panel doesn't leave an empty note behind.
+    /// The editor performs the import when it appears.
+    private func importIntoNewNote(folderId: UUID?) {
+        guard let url = RecordingImporter.pickFile(for: .newNote) else { return }
+        let note = store.createNote(in: folderId)
+        appState.pendingNoteAction = PendingNoteAction(noteId: note.id, kind: .importFile(url))
+        selectedNoteIds = [note.id]
+    }
+
     private func promptNewFolder(_ parentId: UUID?) {
         newFolderParentId = parentId
         newFolderName = ""
@@ -271,6 +291,7 @@ private struct FolderRow: View {
     let folder: Folder
     @Binding var selectedNoteIds: Set<UUID>
     let onNewFolder: (UUID?) -> Void
+    let onImport: (UUID?) -> Void
     let onRequestDelete: (Set<UUID>) -> Void
 
     @State private var isDropTargeted = false
@@ -283,6 +304,7 @@ private struct FolderRow: View {
                     folder: subfolder,
                     selectedNoteIds: $selectedNoteIds,
                     onNewFolder: onNewFolder,
+                    onImport: onImport,
                     onRequestDelete: onRequestDelete
                 )
             }
@@ -313,6 +335,9 @@ private struct FolderRow: View {
                     Button("New Note in \"\(folder.name)\"") {
                         let note = store.createNote(in: folder.id)
                         selectedNoteIds = [note.id]
+                    }
+                    Button("Import into \"\(folder.name)\"…") {
+                        onImport(folder.id)
                     }
                     Button("New Subfolder…") {
                         onNewFolder(folder.id)

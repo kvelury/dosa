@@ -2,11 +2,13 @@
 
 Dosa is a native macOS meeting-notes app. It records meeting audio **directly from your Mac** — no bot joins your call — lets you jot sparse notes in a live markdown editor, and uses your configured LLM provider (Gemini, Anthropic, or DeepSeek) to turn the recording + your notes into polished, structured meeting notes. Your own words stay in the primary text color; Dosa's additions render in a configurable accent color, computed by a deterministic word-level diff.
 
-Because audio is intercepted at the OS level (not via meeting-platform APIs), it works with **any** source: Zoom, Google Meet, Microsoft Teams, Slack huddles, browser tabs, even video files.
+Because audio is intercepted at the OS level (not via meeting-platform APIs), it works with **any** source: Zoom, Google Meet, Microsoft Teams, Slack huddles, browser tabs, even video files. And if the meeting was already recorded somewhere else, drop the audio or video file onto a note and it runs through the same pipeline.
 
 ## Features
 
 - **OS-level recording** — microphone via `AVAudioEngine` + system audio via ScreenCaptureKit loopback, mixed to a single `.m4a`. Live waveform feedback while recording; playback with a scrub bar.
+- **Import audio & video** — drop a file onto a note, or use ⌘O / the sidebar `+` / the ⋯ menu. Anything AVFoundation can decode works — `.mp3`, `.m4a`, `.wav`, `.aiff`, `.flac`, `.aac`, `.caf`, and video containers like `.mp4`, `.mov`, `.m4v`, whose audio track is extracted automatically. Everything is transcoded to `.m4a`, so an imported file behaves exactly like a recording from there on: transcribe, generate, play back, export.
+- **Recordings can't be clobbered** — every recording gets its own never-reused filename, so no import, re-record, or crash recovery can write over audio that already exists. Attaching new audio to a note that already has some always asks first, and offers to use a fresh note instead. A capture interrupted by a crash or a dying system-audio stream is salvaged and recovered on next launch.
 - **Live markdown editor** — headings, bullets, bold/italic/code render as you type; Return continues lists, Tab/⇧Tab indent, ⌘Z undo.
 - **AI notes anchored on yours** — transcription with speaker identification (it knows your name from Settings), then note synthesis that preserves your manual notes (spelling/grammar corrected) and expands around them. Adjustable succinctness (5-level slider), fully editable prompts, editable results with live diff coloring. Stop button to cancel mid-run.
 - **Full transcript** — speaker-labeled, timestamped, viewable in a popup and exportable.
@@ -34,7 +36,7 @@ Installing is opt-in: `--install` quits any running copy, then replaces `/Applic
 
 ### First-run setup
 
-1. **Permissions** — the first recording prompts for **Microphone**; system audio needs **Screen & System Audio Recording** (grant in System Settings, then relaunch Dosa). Because builds are ad-hoc signed, macOS may re-prompt after rebuilds.
+1. **Permissions** — the first recording prompts for **Microphone**; system audio needs **Screen & System Audio Recording** (grant in System Settings, then relaunch Dosa). Because builds are ad-hoc signed, macOS may re-prompt after rebuilds. Importing needs neither permission, so it's the quickest way to try Dosa end to end.
 2. **LLM provider API key** — Settings (bottom-left of the sidebar) → LLM Provider → paste your key. Three providers generate notes, each defaulting to its cheapest/fastest model:
    - **Gemini** ([get a key free](https://ai.google.dev/gemini-api/docs/api-key)) — default `gemini-3.5-flash`, with an automatic fallback chain if a model errors. The only provider that can also transcribe; transcription always runs on `gemini-3.5-flash` regardless of the model picked here, since audio is the token-heavy step and the flash tier handles it well.
    - **Anthropic** ([get a key](https://platform.claude.com/settings/keys)) — default `claude-haiku-4-5`, or pick `claude-sonnet-5` / `claude-opus-5`.
@@ -49,6 +51,7 @@ Installing is opt-in: `--install` quits any running copy, then replaces `/Applic
 | Keys | Action |
 |---|---|
 | ⌘N | New note |
+| ⌘O | Import an audio or video file into a new note |
 | ⌘W | Close note (back to welcome) |
 | ⌘K | Search all notes & transcripts |
 | ⌘F | Search within the open note |
@@ -58,7 +61,8 @@ Installing is opt-in: `--install` quits any running copy, then replaces `/Applic
 ## Data locations
 
 - Notes & folders: `~/Library/Application Support/Dosa/store.json`
-- Recordings: `~/Library/Application Support/Dosa/Recordings/*.m4a`
+- Recordings: `~/Library/Application Support/Dosa/Recordings/<note-id>-<timestamp>.m4a`, with `-mic` / `-system` side tracks beside each one. Names are never reused, so replacing a note's audio leaves the previous file on disk (unlinked from the note) rather than overwriting it — handy if you ever replace one by mistake.
+- In-progress captures: `Recordings/<note-id>-<timestamp>-{mic,system}.caf`, deleted once the recording is safely mixed down. Anything left there is an interrupted session, recovered automatically on next launch.
 - Settings, API key, Notion tokens: app `UserDefaults` (never in this repo)
 
 ## Architecture
@@ -72,6 +76,7 @@ Sources/Dosa/
   DosaApp / AppSettings / Theme      app entry, settings registry, theming tokens
   Models / NotesStore                data model + debounced JSON persistence
   AudioRecorder / AudioPlayer        capture (mic + ScreenCaptureKit), mixdown, playback
+  RecordingImporter                  file picker + format gate for imported audio/video
   GeminiClient / AnthropicClient /
     DeepSeekClient                   REST clients for the supported LLM providers
   GenerationManager                  transcribe→generate pipeline, provider routing
@@ -89,6 +94,9 @@ Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into th
 
 - Gemini (Cloud) transcription requires network and a Gemini API key, and uploads audio to Google's Files API. The on-device engines (Settings → Transcription) avoid both; because the mic and system-audio tracks are kept separately, they still tell your turns from everyone else's, but can't name individual remote participants. On-Device (Advanced) needs macOS 26+, On-Device (Basic) is dictation-grade.
 - For Gemini (Cloud), speaker identification is inferred by the LLM from the mixed track (not channel-separated); the on-device engines split mic vs. system audio instead (see above).
+- **Imported files get no speaker separation on the on-device engines.** That split depends on Dosa having captured your mic and the system audio as two tracks, which an imported file doesn't have — so on-device transcription of an import produces unlabeled `[mm:ss]` lines. Gemini (Cloud) diarizes fine from a single file. Dosa says so in a toast at import time when an on-device engine is selected.
+- WebM and Ogg/Opus files can't be imported — AVFoundation can't demux those containers, so convert to `.m4a` or `.mp4` first. Any file with no readable audio track fails with a clear message and leaves the note untouched.
+- Import isn't cancellable once started, and very large video files are transcoded in full before the note updates.
 - The menu-bar template icons in `Resources/Branding/` (`dosa-menubarTemplate.svg`, `dosa-menubarRecordingTemplate.svg`) aren't wired up yet — Dosa has no menu-bar-extra status item today, so they're reserved for if/when that's built.
 - Ad-hoc signing means permission grants can reset on rebuild.
 - Notion sync is one-way (export/update); bi-directional sync is designed but not built (see the design doc §10.4).

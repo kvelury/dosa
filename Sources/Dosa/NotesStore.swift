@@ -333,6 +333,37 @@ final class NotesStore: ObservableObject {
         }
     }
 
+    /// Attaches an existing audio or video file to a note, transcoding it to the `.m4a`
+    /// the rest of the app expects. The file lands under a fresh name like any other
+    /// recording, so importing can no more overwrite existing audio than recording can.
+    @MainActor
+    func importRecording(from sourceURL: URL, into noteId: UUID) async throws {
+        guard note(id: noteId) != nil else { return }
+        let fileName = newRecordingFileName(for: noteId)
+        let duration: TimeInterval
+        do {
+            // `mix` keeps only the audio track, so this doubles as the extractor for
+            // video containers, with its staging-file and duration checks intact.
+            duration = try await AudioRecorder.mix(
+                inputs: [sourceURL],
+                to: recordingsDirectory.appendingPathComponent(fileName),
+                durationCheck: .lenient
+            )
+        } catch {
+            throw ImportError.noAudioTrack(
+                sourceURL.lastPathComponent,
+                detail: error.localizedDescription
+            )
+        }
+
+        setRecording(noteId: noteId, fileName: fileName, duration: duration)
+        // An untitled note takes the file's name — usually the best title available.
+        if var note = note(id: noteId), note.title.trimmingCharacters(in: .whitespaces).isEmpty {
+            note.title = sourceURL.deletingPathExtension().lastPathComponent
+            update(note)
+        }
+    }
+
     func setRecording(noteId: UUID, fileName: String, duration: TimeInterval) {
         guard var note = note(id: noteId) else { return }
         note.recordingFileName = fileName
