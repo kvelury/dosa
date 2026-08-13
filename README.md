@@ -23,9 +23,14 @@ Requirements: macOS 14+, Xcode Command Line Tools (Swift 5.9+). No external depe
 ```bash
 ./build.sh
 open build/Dosa.app
+
+# or build and install into /Applications in one step
+./build.sh --install
 ```
 
 `build.sh` compiles the Swift package, regenerates the brand assets (app icon + in-app mark) from the source SVGs in `Resources/Branding/`, assembles `build/Dosa.app`, and ad-hoc signs it. For quick iteration, `swift build` alone typechecks everything (but won't refresh the branding assets or produce a runnable `.app`).
+
+Installing is opt-in: `--install` quits any running copy, then replaces `/Applications/Dosa.app`. Plain `./build.sh` never touches `/Applications`, so the edit-build-run loop can't silently swap the app you have installed. Notes and recordings live in `~/Library/Application Support/Dosa/` either way, so both copies read the same data and upgrading never migrates anything.
 
 ### First-run setup
 
