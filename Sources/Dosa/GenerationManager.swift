@@ -31,33 +31,34 @@ final class GenerationManager: ObservableObject {
         guard let note = store.note(id: noteId) else { return }
 
         let provider = AppSettings.currentProvider
-        let geminiKey = (UserDefaults.standard.string(forKey: AppSettings.apiKeyKey) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let deepseekKey = (UserDefaults.standard.string(forKey: AppSettings.deepseekAPIKeyKey) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let providerKey = provider == "DeepSeek" ? deepseekKey : geminiKey
+        let geminiKey = AppSettings.storedAPIKey(for: "Gemini")
+        let providerKey = AppSettings.storedAPIKey(for: provider)
         guard !providerKey.isEmpty else {
             errorMessage = "Add your \(provider) API key first — open Settings with the gear icon at the top of the sidebar."
             return
         }
 
-        let geminiModel = AppSettings.resolveModel(
-            AppSettings.string(forKey: AppSettings.modelKey, default: AppSettings.defaultModel)
-        )
+        let providerModel = AppSettings.resolvedModel(for: provider)
         let transcriptionEngine = AppSettings.resolvedTranscriptionEngine
-        // For Gemini-engine transcription; DeepSeek has no audio input, so the
-        // only alternatives are the on-device Apple engines.
-        let geminiTranscriber = GeminiClient(apiKey: geminiKey, model: geminiModel)
+        // For Gemini-engine transcription only. Neither Anthropic nor DeepSeek
+        // accepts audio, so the alternatives are the on-device Apple engines.
+        // Pinned to the cheap flash tier rather than the user's generation
+        // model — see AppSettings.transcriptionModel.
+        let geminiTranscriber = GeminiClient(
+            apiKey: geminiKey,
+            model: AppSettings.transcriptionModel
+        )
         let generateText: (String) async throws -> String
-        if provider == "DeepSeek" {
-            let deepseekModel = AppSettings.resolveDeepSeekModel(AppSettings.string(
-                forKey: AppSettings.deepseekModelKey, default: AppSettings.defaultDeepSeekModel
-            ))
-            let client = DeepSeekClient(apiKey: deepseekKey, model: deepseekModel)
+        switch provider {
+        case "Anthropic":
+            let client = AnthropicClient(apiKey: providerKey, model: providerModel)
             generateText = { try await client.generateText(prompt: $0) }
-        } else {
-            generateText = { try await geminiTranscriber.generateText(prompt: $0) }
+        case "DeepSeek":
+            let client = DeepSeekClient(apiKey: providerKey, model: providerModel)
+            generateText = { try await client.generateText(prompt: $0) }
+        default:
+            let client = GeminiClient(apiKey: providerKey, model: providerModel)
+            generateText = { try await client.generateText(prompt: $0) }
         }
 
         activeNoteId = noteId

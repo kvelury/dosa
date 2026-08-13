@@ -7,6 +7,7 @@ struct SetupBanner: View {
     @AppStorage(AppSettings.userNameKey) private var userName = ""
     @AppStorage(AppSettings.apiKeyKey) private var apiKey = ""
     @AppStorage(AppSettings.deepseekAPIKeyKey) private var deepseekAPIKey = ""
+    @AppStorage(AppSettings.anthropicAPIKeyKey) private var anthropicAPIKey = ""
     @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
     let onOpenSettings: () -> Void
 
@@ -16,7 +17,12 @@ struct SetupBanner: View {
 
     private var missingAPIKey: Bool {
         let provider = AppSettings.supportedProviders.contains(llmProvider) ? llmProvider : "Gemini"
-        let providerKey = provider == "DeepSeek" ? deepseekAPIKey : apiKey
+        let providerKey: String
+        switch provider {
+        case "Anthropic": providerKey = anthropicAPIKey
+        case "DeepSeek": providerKey = deepseekAPIKey
+        default: providerKey = apiKey
+        }
         return providerKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 

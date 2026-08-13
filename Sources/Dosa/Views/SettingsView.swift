@@ -10,6 +10,7 @@ private struct SettingsSnapshot: Codable {
     var geminiModel: String?
     var llmProvider: String?
     var deepseekModel: String?
+    var anthropicModel: String?
     var transcriptionEngine: String?
     var notesVerbosity: Int?
     var theme: String?
@@ -35,6 +36,8 @@ struct SettingsView: View {
     @AppStorage(AppSettings.llmProviderKey) private var defaultProvider = "Gemini"
     @AppStorage(AppSettings.deepseekAPIKeyKey) private var deepseekAPIKey = ""
     @AppStorage(AppSettings.deepseekModelKey) private var deepseekModel = AppSettings.defaultDeepSeekModel
+    @AppStorage(AppSettings.anthropicAPIKeyKey) private var anthropicAPIKey = ""
+    @AppStorage(AppSettings.anthropicModelKey) private var anthropicModel = AppSettings.defaultAnthropicModel
     @AppStorage(AppSettings.transcriptionEngineKey) private var transcriptionEngine = AppSettings.TranscriptionEngine.gemini.rawValue
     @AppStorage(AppSettings.notesPromptKey) private var notesPrompt = AppSettings.defaultNotesPrompt
     @AppStorage(AppSettings.transcriptPromptKey) private var transcriptPrompt = AppSettings.defaultTranscriptPrompt
@@ -127,6 +130,17 @@ struct SettingsView: View {
         }
     }
 
+    /// Shown on the tabs of providers that generate notes but can't take audio.
+    @ViewBuilder
+    private func textOnlyProviderNote(_ name: String) -> some View {
+        Text("\(name) generates your notes but can't transcribe audio — recordings use the engine picked in the Transcription section above. A Gemini key is only needed if that engine is Gemini (Cloud).")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     /// One-line description of whichever transcription engine is selected.
     private var transcriptionEngineBlurb: String {
         switch AppSettings.TranscriptionEngine(rawValue: transcriptionEngine) ?? .gemini {
@@ -144,7 +158,12 @@ struct SettingsView: View {
     /// so the picker updates live as keys are typed or cleared.
     private var configuredProviders: [String] {
         AppSettings.supportedProviders.filter { provider in
-            let key = provider == "DeepSeek" ? deepseekAPIKey : apiKey
+            let key: String
+            switch provider {
+            case "Anthropic": key = anthropicAPIKey
+            case "DeepSeek": key = deepseekAPIKey
+            default: key = apiKey
+            }
             return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
@@ -249,6 +268,23 @@ struct SettingsView: View {
                                 Text(name)
                             }
                         }
+                        Text("Applies to note generation. Transcription always uses \(AppSettings.transcriptionModel) — the cheapest tier that handles audio.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if selectedTab == "Anthropic" {
+                        SecureField("API Key", text: $anthropicAPIKey)
+                        Link("Get an API key at platform.claude.com →",
+                             destination: URL(string: "https://platform.claude.com/settings/keys")!)
+                            .font(.caption)
+                        Picker("Model", selection: $anthropicModel) {
+                            ForEach(AppSettings.availableAnthropicModels, id: \.self) { name in
+                                Text(name)
+                            }
+                        }
+                        textOnlyProviderNote("Claude")
                     } else if selectedTab == "DeepSeek" {
                         SecureField("API Key", text: $deepseekAPIKey)
                         Link("Get an API key at platform.deepseek.com →",
@@ -259,12 +295,7 @@ struct SettingsView: View {
                                 Text(name)
                             }
                         }
-                        Text("DeepSeek generates your notes but can't transcribe audio — recordings use the engine picked in the Transcription section above. A Gemini key is only needed if that engine is Gemini (Cloud).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        textOnlyProviderNote("DeepSeek")
                     } else {
                         Text("\(selectedTab) support is coming soon.")
                             .font(.callout)
@@ -438,6 +469,7 @@ struct SettingsView: View {
         .onAppear {
             model = AppSettings.resolveModel(model)
             deepseekModel = AppSettings.resolveDeepSeekModel(deepseekModel)
+            anthropicModel = AppSettings.resolveAnthropicModel(anthropicModel)
             let configured = configuredProviders
             if !AppSettings.supportedProviders.contains(defaultProvider)
                 || (!configured.isEmpty && !configured.contains(defaultProvider)) {
@@ -565,6 +597,7 @@ struct SettingsView: View {
             geminiModel: model,
             llmProvider: defaultProvider,
             deepseekModel: deepseekModel,
+            anthropicModel: anthropicModel,
             transcriptionEngine: transcriptionEngine,
             notesVerbosity: verbosity,
             theme: themeName,
@@ -598,6 +631,7 @@ struct SettingsView: View {
             if let value = snapshot.geminiModel { model = AppSettings.resolveModel(value) }
             if let value = snapshot.llmProvider, AppSettings.supportedProviders.contains(value) { defaultProvider = value }
             if let value = snapshot.deepseekModel { deepseekModel = AppSettings.resolveDeepSeekModel(value) }
+            if let value = snapshot.anthropicModel { anthropicModel = AppSettings.resolveAnthropicModel(value) }
             if let value = snapshot.transcriptionEngine,
                AppSettings.TranscriptionEngine(rawValue: value) != nil { transcriptionEngine = value }
             if let value = snapshot.notesVerbosity { verbosity = min(max(value, 0), 4) }

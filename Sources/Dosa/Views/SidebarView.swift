@@ -17,13 +17,20 @@ struct SidebarView: View {
     @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
     @AppStorage(AppSettings.modelKey) private var geminiModel = AppSettings.defaultModel
     @AppStorage(AppSettings.deepseekModelKey) private var deepseekModel = AppSettings.defaultDeepSeekModel
+    @AppStorage(AppSettings.anthropicModelKey) private var anthropicModel = AppSettings.defaultAnthropicModel
 
     /// The model the default provider will actually use, for the footer line.
+    /// Reads the @AppStorage values rather than AppSettings so the line
+    /// refreshes as soon as the model picker changes.
     private var activeModelName: String {
-        if AppSettings.supportedProviders.contains(llmProvider), llmProvider == "DeepSeek" {
-            return AppSettings.resolveDeepSeekModel(deepseekModel)
+        guard AppSettings.supportedProviders.contains(llmProvider) else {
+            return AppSettings.resolveModel(geminiModel)
         }
-        return AppSettings.resolveModel(geminiModel)
+        switch llmProvider {
+        case "Anthropic": return AppSettings.resolveAnthropicModel(anthropicModel)
+        case "DeepSeek": return AppSettings.resolveDeepSeekModel(deepseekModel)
+        default: return AppSettings.resolveModel(geminiModel)
+        }
     }
 
     var body: some View {

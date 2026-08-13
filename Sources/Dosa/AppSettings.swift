@@ -42,16 +42,46 @@ enum AppSettings {
     static let llmProviderKey = "llmProvider"
     static let deepseekAPIKeyKey = "deepseekAPIKey"
     static let deepseekModelKey = "deepseekModel"
+    static let anthropicAPIKeyKey = "anthropicAPIKey"
+    static let anthropicModelKey = "anthropicModel"
     static let notesPromptKey = "notesPromptTemplate"
     static let transcriptPromptKey = "transcriptPromptTemplate"
 
     /// Providers with a working integration; anything else stored under
     /// `llmProviderKey` (e.g. a "coming soon" tab) resolves to Gemini.
-    static let supportedProviders = ["Gemini", "DeepSeek"]
+    static let supportedProviders = ["Gemini", "Anthropic", "DeepSeek"]
 
     static var currentProvider: String {
         let stored = UserDefaults.standard.string(forKey: llmProviderKey) ?? "Gemini"
         return supportedProviders.contains(stored) ? stored : "Gemini"
+    }
+
+    /// The UserDefaults key holding a provider's API key.
+    static func apiKeyStorageKey(for provider: String) -> String {
+        switch provider {
+        case "Anthropic": return anthropicAPIKeyKey
+        case "DeepSeek": return deepseekAPIKeyKey
+        default: return apiKeyKey
+        }
+    }
+
+    /// A provider's saved API key, trimmed.
+    static func storedAPIKey(for provider: String) -> String {
+        (UserDefaults.standard.string(forKey: apiKeyStorageKey(for: provider)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The model a provider will actually use, with stale/unknown stored
+    /// values resolved to something currently served.
+    static func resolvedModel(for provider: String) -> String {
+        switch provider {
+        case "Anthropic":
+            return resolveAnthropicModel(string(forKey: anthropicModelKey, default: defaultAnthropicModel))
+        case "DeepSeek":
+            return resolveDeepSeekModel(string(forKey: deepseekModelKey, default: defaultDeepSeekModel))
+        default:
+            return resolveModel(string(forKey: modelKey, default: defaultModel))
+        }
     }
 
     static let transcriptionEngineKey = "transcriptionEngine"
@@ -85,11 +115,7 @@ enum AppSettings {
     /// Providers with an API key saved — the only valid choices for the
     /// Default Provider picker in Settings.
     static var configuredProviders: [String] {
-        supportedProviders.filter { provider in
-            let keyKey = provider == "DeepSeek" ? deepseekAPIKeyKey : apiKeyKey
-            return !(UserDefaults.standard.string(forKey: keyKey) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+        supportedProviders.filter { !storedAPIKey(for: $0).isEmpty }
     }
 
     // deepseek-v4-flash is the fast/cheap default; deepseek-v4-pro is the
@@ -105,6 +131,16 @@ enum AppSettings {
         "deepseek-reasoner": "deepseek-v4-pro",
     ]
 
+    // Haiku is the cheapest/fastest tier and the default, matching the other
+    // providers; Sonnet and Opus are selectable when notes need more depth.
+    // (Model IDs are complete as written — they never take a date suffix.)
+    static let defaultAnthropicModel = "claude-haiku-4-5"
+    static let availableAnthropicModels = ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"]
+
+    static func resolveAnthropicModel(_ name: String) -> String {
+        availableAnthropicModels.contains(name) ? name : defaultAnthropicModel
+    }
+
     static func resolveDeepSeekModel(_ name: String) -> String {
         if let remapped = retiredDeepSeekRemap[name] { return remapped }
         return availableDeepSeekModels.contains(name) ? name : defaultDeepSeekModel
@@ -114,6 +150,13 @@ enum AppSettings {
     // alias (currently gemini-3.6-flash) 500s on audio input as of Aug 2026.
     static let defaultModel = "gemini-3.5-flash"
     static let availableModels = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-pro-latest", "gemini-3-flash-preview"]
+
+    /// Transcription always runs on the cheapest flash tier, whatever model is
+    /// picked for note generation: speech-to-text is the token-heavy step (a
+    /// long meeting is a lot of audio input), the flash models handle it well,
+    /// and pro-tier rates buy nothing here. It's also the tier verified to work
+    /// with audio at all — see the model-landscape note above.
+    static let transcriptionModel = "gemini-3.5-flash"
 
     /// Tried in order when the selected model fails with a server error, a
     /// retired-model 404, or a quota 429.

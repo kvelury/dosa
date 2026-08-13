@@ -9,7 +9,7 @@
 
 ## 1. What Dosa does
 
-Dosa records meeting audio **directly from the Mac** (no bot joins the call), lets the user take sparse manual notes in a live markdown editor, then uses the **configured LLM provider** (Gemini or DeepSeek) to (1) transcribe the recording with speaker identification and (2) synthesize polished meeting notes anchored on the user's manual notes. (Transcription always runs on Gemini — DeepSeek has no audio input.) Generated notes render with a deterministic word-level diff: the user's words in the primary text color, Dosa's additions in a configurable grey/color. Notes can be organized in nested folders, pinned, searched globally, exported to disk, and exported to a **Notion database** that Dosa creates automatically via Notion's hosted MCP server.
+Dosa records meeting audio **directly from the Mac** (no bot joins the call), lets the user take sparse manual notes in a live markdown editor, then uses the **configured LLM provider** (Gemini, Anthropic, or DeepSeek) to (1) transcribe the recording with speaker identification and (2) synthesize polished meeting notes anchored on the user's manual notes. (Only Gemini accepts audio; with Anthropic or DeepSeek selected, transcription falls to the engine chosen in Settings → Transcription.) Generated notes render with a deterministic word-level diff: the user's words in the primary text color, Dosa's additions in a configurable grey/color. Notes can be organized in nested folders, pinned, searched globally, exported to disk, and exported to a **Notion database** that Dosa creates automatically via Notion's hosted MCP server.
 
 Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), it works with any source: Zoom, Meet, Teams, Slack huddles, browser tabs, video files.
 
@@ -40,6 +40,8 @@ Sources/Dosa/
   AudioRecorder.swift    Mic + system-audio capture, m4a mixdown, level metering
   AudioPlayer.swift      Playback with pause/seek/progress
   GeminiClient.swift     Gemini REST client + DetailedError protocol
+  AnthropicClient.swift  Anthropic Messages API REST client (text-only)
+  DeepSeekClient.swift   DeepSeek chat/completions REST client (text-only)
   GenerationManager.swift  Transcribe→generate pipeline, cancellation, post-processing
   DiffEngine.swift       Tokenizer + attributed diff + Dosa-color registry
   SearchService.swift    Match finding, snippets, SearchCoordinator (reveal bus)
@@ -153,6 +155,14 @@ Two simultaneous captures, both written to temp `.caf` files during recording, m
 - Models: `deepseek-v4-flash` (default — fast/cheap) and `deepseek-v4-pro` (`AppSettings.availableDeepSeekModels`; lineup per api-docs.deepseek.com as of Aug 2026). `AppSettings.resolveDeepSeekModel` remaps the retired `deepseek-chat`/`deepseek-reasoner` names and any unknown stored value to a current model. No fallback chain (nothing to fall back to).
 - `DeepSeekError` conforms to `DetailedError` like `GeminiError` (friendly summary + raw payload for the error dialog).
 
+### 5.1bb AnthropicClient (`AnthropicClient.swift`)
+
+- REST, no SDK — Anthropic ships no official Swift SDK. `POST /v1/messages` with `x-api-key` + `anthropic-version: 2023-06-01`; single user message; text blocks of the response `content` array joined.
+- **Text-only**, same as DeepSeek: no audio endpoint, so it serves note generation only.
+- Models (`AppSettings.availableAnthropicModels`, IDs verified against platform.claude.com Aug 2026): `claude-haiku-4-5` (default — cheapest/fastest tier, $1/$5 per MTok), `claude-sonnet-5`, `claude-opus-5`. IDs are complete as written and never take a date suffix. `resolveAnthropicModel` falls back to the default for any unknown stored value.
+- **No `thinking` / `effort` parameters are sent.** Haiku 4.5 supports neither and would 400; left unset, Sonnet 5 and Opus 5 think adaptively by default while Haiku answers directly. `max_tokens` (16K) therefore has to cover thinking *plus* the reply on the thinking models — sized well above what notes need, and kept low enough that the non-streaming request can't hit an HTTP timeout.
+- **`stop_reason: "refusal"` is checked before reading content.** A safety decline is a successful HTTP 200 with empty or partial content, so indexing the content blocks first would surface it as a confusing "unexpected response" rather than a refusal. `AnthropicError` conforms to `DetailedError`.
+
 ### 5.1c AppleTranscriber (`AppleTranscriber.swift`) — on-device transcription
 
 - `AppSettings.TranscriptionEngine`: `.gemini` (default) / `.appleAdvanced` / `.appleBasic`, stored under `transcriptionEngine`; `resolvedTranscriptionEngine` degrades Advanced→Basic when unavailable.
@@ -169,7 +179,8 @@ Two simultaneous captures, both written to temp `.caf` files during recording, m
 
 Pipeline per note: **transcribe (if no cached transcript) → generate**.
 
-- **Provider routing**: `AppSettings.currentProvider` (UserDefaults `llmProvider`; anything outside `supportedProviders` — e.g. the "coming soon" Anthropic/OpenAI tabs — resolves to Gemini). Generation uses `DeepSeekClient` when DeepSeek is selected, else `GeminiClient`. Transcription uses `resolvedTranscriptionEngine`: `GeminiClient` for `.gemini` (requires a Gemini key — errors only when a transcription is actually needed), `AppleTranscriber` for the on-device engines (no key). Missing provider key errors up front.
+- **Provider routing**: `AppSettings.currentProvider` (UserDefaults `llmProvider`; anything outside `supportedProviders` — e.g. the "coming soon" OpenAI tab — resolves to Gemini). Generation switches on the provider to `AnthropicClient` / `DeepSeekClient` / `GeminiClient`; the key and model come from `AppSettings.storedAPIKey(for:)` and `resolvedModel(for:)`, so adding a provider touches one switch rather than a ternary in every call site. Transcription uses `resolvedTranscriptionEngine`: `GeminiClient` for `.gemini` (requires a Gemini key — errors only when a transcription is actually needed), `AppleTranscriber` for the on-device engines (no key). Missing provider key errors up front.
+- **Transcription is pinned to `AppSettings.transcriptionModel` (`gemini-3.5-flash`)**, not the user's selected Gemini model. Audio is the token-heavy input and the flash tier handles it well, so a pro-tier selection for note generation shouldn't silently bill pro rates for speech-to-text; it's also the tier verified to work with audio (see the §5.1 model-landscape callout). The Gemini settings tab says so under its model picker.
 - Prompts come from UserDefaults with fallbacks to `AppSettings.defaultTranscriptPrompt` / `defaultNotesPrompt` (empty/whitespace stored value ⇒ default, via `AppSettings.string(forKey:default:)`).
 - Placeholder substitution: `{{title}}`, `{{date}}`, `{{user_name}}` (from Profile settings; fallback text asks the model to infer), `{{verbosity}}` (5-level instruction from the Notes Style slider, default level 2 "Balanced"), `{{manual_notes}}`, `{{transcript}}`.
 - The transcript prompt tells the model the recorder's name = mic voice (fixes wrong-name guessing). "Re-transcribe & Regenerate" (⋯ menu) clears the cached transcript first.
@@ -302,9 +313,9 @@ Per-note sync toggle (data-source destinations only); push = debounced `replace_
 
 ## 11. Settings (`SettingsView.swift`)
 
-Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Notion** (§10) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini and DeepSeek tabs = API key + link + model picker, DeepSeek adds a transcription-still-uses-Gemini caption; Anthropic/OpenAI tabs are "coming soon" stubs that resolve to Gemini at generation time) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
+Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Notion** (§10) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
 
-- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models.
+- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models.
 - Closing Settings bumps `themeRefreshTick` (§8).
 
 > **CALLOUT — Form footer text on macOS 26 right-aligns wrapped lines** unless you add `.multilineTextAlignment(.leading)` (plus `.fixedSize(horizontal: false, vertical: true)` and a leading-aligned max-width frame). All footers here do this; keep the pattern for new ones. Similarly, a bare `Slider` in a grouped Form gets shoved into the trailing "value column" — give it a hidden empty label + `.frame(maxWidth: .infinity)`.
@@ -322,7 +333,7 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 
 ## 13. Error handling
 
-- `DetailedError { errorDetail: String? }` — conformed by `GeminiError`, `DeepSeekError`, and `NotionMCPClient.ClientError`; friendly `errorDescription` + raw payload separated.
+- `DetailedError { errorDetail: String? }` — conformed by `GeminiError`, `AnthropicError`, `DeepSeekError`, and `NotionMCPClient.ClientError`; friendly `errorDescription` + raw payload separated.
 - `ErrorDialogView` (sheet, not alert — alerts can't hold disclosure groups): warning icon, summary line, collapsed **"Show technical details"** (150 pt scrollable, selectable, monospaced raw body), OK. Presented from NoteEditorView via `errorPresented` binding that clears `localError(+Detail)` and `generator.errorMessage(+Detail)` on dismiss; Notion export errors are copied into the local pair. Notion *connection* errors render red in the Settings footer instead.
 - Generation cancellations are silent by design.
 
