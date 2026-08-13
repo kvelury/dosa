@@ -20,8 +20,10 @@ Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), 
 **Swift Package (SPM), not Xcode project.** Built with `swift build`, assembled into a `.app` bundle by `build.sh`:
 
 1. `swift build -c release`
-2. Generates `Resources/AppIcon.icns` via `Scripts/make_icon.swift` if missing (draws gradient tile + `waveform.and.mic` SF Symbol, packages with `sips` + `iconutil`)
-3. Assembles `build/Dosa.app/Contents/{MacOS/Dosa, Info.plist, Resources/AppIcon.icns}`
+2. Regenerates the brand assets via `Scripts/make_icon.swift`, unconditionally, every build (no longer guarded behind "if missing" — a stale icon/mark from before a source-SVG change is worse than the ~1s regeneration cost):
+   - `Resources/AppIcon.icns`: rasterizes `Resources/Branding/dosa-icon-1024.svg` (brown tile, amber mark) via `NSImage(contentsOfFile:)` — verified pixel-accurate for this file's plain SVG feature set — then packages the usual resolution set with `sips` + `iconutil`.
+   - `Resources/dosa-mark-{light,dark}.png`: rasterizes `Resources/Branding/dosa-mark-currentcolor.svg` (a template shape — solid black, transparent elsewhere) once, then tints it twice via `NSColor.set()` + `NSRect.fill(using: .sourceIn)` (the same alpha-preserving technique AppKit uses internally for `.isTemplate` images) — brown `#7A4512` for light appearance, amber `#E0A44E` for dark. Same brand pairing `dosa-mark-adaptive.svg` encodes via CSS, reproduced natively because that file's `@media (prefers-color-scheme:)` rules render inconsistently through `NSImage`/ImageIO (confirmed: mixed light/dark rule results within one raster) — not safe for native rendering.
+3. Assembles `build/Dosa.app/Contents/{MacOS/Dosa, Info.plist, Resources/{AppIcon.icns, dosa-mark-light.png, dosa-mark-dark.png}}`
 4. **Ad-hoc codesigns** (`codesign --force --sign -`)
 
 **Dev loop**: `swift build` to typecheck; `./build.sh && open build/Dosa.app` to ship. Kill the running app first (`pkill -x Dosa`).
@@ -57,9 +59,25 @@ Sources/Dosa/
     WelcomeView.swift    Greeting, stats, shortcut hints
     DeletedNoteView.swift  Trash preview with restore/delete
     SharedViews.swift    RecordingWaveformView, ErrorDialogView, MultiSelectionView
+  Branding.swift         DosaMark view — loads dosa-mark-{light,dark}.png from Bundle.main,
+                         picks by @Environment(\.colorScheme)
 Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
+Resources/Branding/     Source SVGs (app icon, in-app mark, menu-bar templates — see §2b)
 build.sh / Scripts/make_icon.swift
 ```
+
+### 2b. Branding assets (`Resources/Branding/`, `Scripts/make_icon.swift`, `Branding.swift`)
+
+All 7 source SVGs delivered with the current logo are committed under `Resources/Branding/` as the source of truth, but only two are wired into the app today:
+
+- `dosa-icon-1024.svg` → the app icon (`Resources/AppIcon.icns`).
+- `dosa-mark-currentcolor.svg` → the in-app brand mark (`DosaMark`), shown at `WelcomeView`'s hero size and in the sidebar footer next to the version/model line.
+
+Both use `NSImage(contentsOfFile:)` to rasterize the *actual* SVG at build time rather than hand-reproducing the geometry in AppKit/SwiftUI — verified pixel-accurate against these files (plain `<rect>`/`<g transform>`/`<circle>` + `stroke-dasharray`, no CSS). `DosaMark` itself does zero SVG/asset loading at runtime beyond reading two plain PNGs baked at build time (`dosa-mark-light.png` / `dosa-mark-dark.png`) via `Bundle.main` — deliberately *not* SwiftPM's `resources:`/`Bundle.module` mechanism, since this project hand-assembles its `.app` in `build.sh` rather than letting SwiftPM produce one, and `Bundle.module`'s companion resource bundle would need its own separate copy step to land inside `build/Dosa.app/Contents/Resources/`. Reusing the exact `Resources/` → `cp` → `Bundle.main` path already proven for `Info.plist`/`AppIcon.icns` avoids that whole class of packaging bug.
+
+The mark is brand-fixed brown/amber (`#7A4512` / `#E0A44E`) regardless of which of the 5 accent-theme presets is selected — it switches only on light/dark **appearance** (`@Environment(\.colorScheme)`, which follows `AppSettings`'s Auto/Light/Dark override same as the rest of the app), since every theme preset's `editorBackground` is a near-white/near-black neutral (see §8) — the brown/amber pair reads fine against all of them.
+
+**Not yet wired up**: `dosa-menubarTemplate.svg` / `dosa-menubarRecordingTemplate.svg` — flat-black idle/recording icons sized for an `NSStatusItem`/`MenuBarExtra`, which Dosa doesn't have. `dosa-mark-cream.svg` (a lighter alternate mark, e.g. for a dark solid-color hero) and `dosa-mark-adaptive.svg` (the CSS self-adapting version — kept as reference for the intended color pairing, not for rendering) are also unused. All are preserved in `Resources/Branding/` for whenever those features exist.
 
 **Window chrome**: `.windowStyle(.hiddenTitleBar)` — no title bar; traffic lights overlay the sidebar's top-left, which is why the sidebar's icon row has `.padding(.top, 34)`.
 

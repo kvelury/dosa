@@ -6,7 +6,15 @@
 	<dict>
 		<key>Resources/AppIcon.icns</key>
 		<data>
-		zrzJXu9ndDujLq781/5dcr4AqJE=
+		PuihmXWVpRaZtEElBPEibWeVVLo=
+		</data>
+		<key>Resources/dosa-mark-dark.png</key>
+		<data>
+		zENDAgst7544N1F0bppdSTUhoLg=
+		</data>
+		<key>Resources/dosa-mark-light.png</key>
+		<data>
+		+i9wEoRdw6H5Cj29c/Kr4FQ2++0=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -15,7 +23,21 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			M81wti3x4+XdRZVSfg5aJStM/UM+3lu3SR8YuLSDh8Y=
+			Bq6fqoqK6inrjXTqcQdLGdD4y37nGfPeSTP0y7/bvUI=
+			</data>
+		</dict>
+		<key>Resources/dosa-mark-dark.png</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			WNuF5WKy6Icp7ow8oHxopx7CqzX/wYhNYA8LC/WwN2s=
+			</data>
+		</dict>
+		<key>Resources/dosa-mark-light.png</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			/oYATxgbflcNCNcNfx2+BF8TKpP4Y3/bxScAQTRWSQ0=
 			</data>
 		</dict>
 	</dict>
