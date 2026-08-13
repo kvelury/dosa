@@ -266,7 +266,7 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        Text("\(selectedTab) support is coming soon. Until then Dosa uses Gemini for transcription and note generation.")
+                        Text("\(selectedTab) support is coming soon.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.leading)
