@@ -1,5 +1,58 @@
 import SwiftUI
 
+/// Shown at the top of every detail-pane page until the user has a name and
+/// an LLM API key configured — both are required before recording/notes are
+/// actually usable, but nothing else in the app enforces that up front.
+struct SetupBanner: View {
+    @AppStorage(AppSettings.userNameKey) private var userName = ""
+    @AppStorage(AppSettings.apiKeyKey) private var apiKey = ""
+    let onOpenSettings: () -> Void
+
+    private var missingName: Bool {
+        userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var missingAPIKey: Bool {
+        apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var message: String? {
+        switch (missingName, missingAPIKey) {
+        case (true, true):
+            return "Finish setting up Dosa — add your name and a Gemini API key in Settings."
+        case (true, false):
+            return "Add your name in Settings so Dosa can label your voice correctly."
+        case (false, true):
+            return "Add a Gemini API key in Settings to enable transcription and note generation."
+        case (false, false):
+            return nil
+        }
+    }
+
+    var body: some View {
+        if let message {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Theme.current.highlightColor)
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Open Settings", action: onOpenSettings)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.current.accentColor)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Theme.current.cardFillColor)
+            .overlay(alignment: .bottom) {
+                Divider()
+            }
+        }
+    }
+}
+
 /// Live audio-level bars shown in the floating bar while recording, so the
 /// user can see that real audio is being picked up.
 struct RecordingWaveformView: View {
