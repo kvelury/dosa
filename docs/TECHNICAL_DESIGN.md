@@ -11,7 +11,7 @@
 
 Dosa records meeting audio **directly from the Mac** (no bot joins the call), lets the user take sparse manual notes in a live markdown editor, then uses the **configured LLM provider** (Gemini, Anthropic, or DeepSeek) to (1) transcribe the recording with speaker identification and (2) synthesize polished meeting notes anchored on the user's manual notes. (Only Gemini accepts audio; with Anthropic or DeepSeek selected, transcription falls to the engine chosen in Settings → Transcription.) Generated notes render with a deterministic word-level diff: the user's words in the primary text color, Dosa's additions in a configurable grey/color. Notes can be organized in nested folders, pinned, searched globally, exported to disk, and exported to a **Notion database** that Dosa creates automatically via Notion's hosted MCP server.
 
-Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), it works with any source: Zoom, Meet, Teams, Slack huddles, browser tabs, video files.
+Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), it works with any source: Zoom, Meet, Teams, Slack huddles, browser tabs, video files. Audio already captured elsewhere can be **imported** instead (§4.2) — after the import step nothing downstream distinguishes it from a recording.
 
 ---
 
@@ -33,12 +33,13 @@ Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), 
 
 ```
 Sources/Dosa/
-  DosaApp.swift          @main App; AppState; menu-bar commands (⌘N/⌘W/⌘K/⌘F)
+  DosaApp.swift          @main App; AppState; PendingNoteAction; commands (⌘N/⌘O/⌘W/⌘K/⌘F)
   AppSettings.swift      All UserDefaults keys, default prompts, verbosity, appearance
   Theme.swift            Preset palettes + accent override + styleFingerprint
   Models.swift           Note, Folder, TimeFormatting
   NotesStore.swift       Persistence, folders, pins, trash, stats
   AudioRecorder.swift    Mic + system-audio capture, m4a mixdown, level metering
+  RecordingImporter.swift  File picker, format gate, and import error mapping
   AudioPlayer.swift      Playback with pause/seek/progress
   GeminiClient.swift     Gemini REST client + DetailedError protocol
   AnthropicClient.swift  Anthropic Messages API REST client (text-only)
@@ -110,9 +111,10 @@ struct Note {
 
 - Plain `ObservableObject` (deliberately **not** `@MainActor` — avoids Binding-closure isolation friction; all access happens on main in practice).
 - Persistence: single JSON `~/Library/Application Support/Dosa/store.json` (`Snapshot { notes, folders }`, ISO-8601 dates, pretty-printed). Saves are **debounced 400 ms** (`scheduleSave()`); `persistNow()` also runs on `NSApplication.willTerminateNotification`.
-- Recordings: `~/Library/Application Support/Dosa/Recordings/<noteId>.m4a`.
+- Recordings: `~/Library/Application Support/Dosa/Recordings/<noteId>-<yyyyMMdd-HHmmss-SSS>.m4a`, with `-mic`/`-system` side tracks and, while a capture is live, `-{mic,system}.caf` scratch beside them. `newRecordingFileName(for:)` mints a fresh name per recording and never reuses one (collision fallback: a UUID suffix) — that uniqueness is what makes overwriting structurally impossible rather than merely discouraged (§4.1). The note-id prefix is how `recoverInterruptedRecordings` maps an orphaned scratch file back to its note (§4.4).
 - `noteBinding(id:) -> Binding<Note>?` — lookup-by-id in both get/set (index-free, safe against reordering). The editor binds `TextField`/editors through this; every keystroke goes through `update(_:)` → debounced save.
-- Trash: `moveToTrash` sets `deletedAt`; `purgeExpiredDeletedNotes()` (called in `init`) permanently deletes anything older than `trashRetentionDays = 30`; `deletePermanently` also removes the recording file.
+- Trash: `moveToTrash` sets `deletedAt`; `purgeExpiredDeletedNotes()` (called in `init`) permanently deletes anything older than `trashRetentionDays = 30`; `deletePermanently` also removes the recording files.
+- `removeRecordingFiles(for:includingHistory:)` is the **only** path that deletes audio, and both callers are explicit user actions. `deletePermanently` passes `true`, sweeping every file with the note's id prefix so replaced-but-orphaned recordings don't leak. `discardRecording` passes `false` — discarding one recording must not quietly take the note's earlier ones with it, since those are the safety net that "Replace It" relies on.
 - Pins: `togglePin(Set<UUID>)` — pins all if any target is unpinned, else unpins all. `notes(in:)` **excludes pinned notes** (they render only in the Pinned section); `pinnedNotes` sorts by `pinnedAt` desc.
 - Stats for the welcome screen: `meetingsRecorded`, `totalRecordedTimeText`, `notesGeneratedCount`.
 
@@ -120,7 +122,11 @@ struct Note {
 
 ## 4. Audio pipeline (`AudioRecorder.swift`)
 
-Two simultaneous captures, both written to temp `.caf` files during recording, mixed to one `.m4a` on stop:
+Audio reaches a note two ways — live capture (§4.1) and file import (§4.2) — converging on the same `mix` helper (§4.3) and the same `NotesStore.setRecording`. After that step nothing downstream can tell them apart.
+
+### 4.1 Capture
+
+Two simultaneous captures, both written to per-recording `.caf` scratch files during recording, mixed to one `.m4a` on stop:
 
 | Stream | API | Notes |
 |---|---|---|
@@ -129,9 +135,39 @@ Two simultaneous captures, both written to temp `.caf` files during recording, m
 
 - **Permissions**: mic via `AVCaptureDevice.requestAccess(.audio)`; system audio needs Screen & System Audio Recording (`CGPreflightScreenCaptureAccess` / `CGRequestScreenCaptureAccess`; grant requires app relaunch — the thrown error explains this).
 - **Threading**: all file writes on the serial `sampleQueue`; files are closed on that queue via a checked continuation before mixing (flush guarantee). Published props mutated on main.
-- **Mixdown**: `AVMutableComposition` with both tracks inserted at `.zero` → `AVAssetExportSession(presetName: AVAssetExportPresetAppleM4A)` → `.m4a`. The same `mix` helper then runs once per source to keep `<id>-mic.m4a` / `<id>-system.m4a` beside it (see §5.1c) — roughly doubling recording storage, in exchange for on-device speaker attribution. `await session.export()` is deprecated on macOS 15 but functional. Small start-time skew between mic/system (~100s of ms) is accepted.
+- **Mixdown**: on stop, `mix` (§4.3) combines both scratch files, then runs once per source to keep `<base>-mic.m4a` / `<base>-system.m4a` beside the mixed file (see §5.1c) — roughly doubling recording storage, in exchange for on-device speaker attribution. Small start-time skew between mic/system (~100s of ms) is accepted.
 - **Level metering** (drives the waveform): RMS is computed per buffer (every 8th sample) for both streams; `peakLevel` (sampleQueue-owned) keeps the max and decays ×0.5 each tick. A 0.09 s main-thread timer shifts `levelHistory: [Float]` (7 entries, scaled `min(1, rms*7)`), consumed by `RecordingWaveformView` (7 animated capsules).
-- Re-recording is only possible after **Discard Recording** (⋯ menu) — setting a new recording clears `transcript` (`setRecording`), and discarding clears recording+transcript but keeps `enhancedMarkdown`.
+- **Session claiming**: `start` claims the session synchronously (`beginSession`, `NSLock`) *before its first `await`*. `isRecording` doesn't flip until setup finishes, and setup can sit for seconds on a permission prompt — a second Record click landing in that window would otherwise run a whole second capture concurrently. `stop` and the interruption handler both go through `claimSession()`, so exactly one of them finishes the session.
+- **Interruption salvage**: `SCStream`'s `didStopWithError` (display sleep, permission revocation, stream death mid-meeting) used to silently set `isRecording = false`, which flipped the UI back to a Record button with the capture still unmixed. It now finishes the session, mixes what was captured, and publishes `interruption: Interruption?`; `ContentView` observes it, calls `setRecording`, selects the note, and shows the message.
+
+> **CALLOUT — captured audio is never destroyed to make room for new audio.** This is a hard invariant, added after a 53-minute meeting was lost by clicking Record twice. Three properties enforce it: (1) recording file names are unique and never reused, so no new recording can resolve to an existing path; (2) `mix` exports to a staging file and only replaces the destination after verifying the result (§4.3); (3) scratch files live in the app's own directory keyed per recording — not `$TMPDIR`, which macOS purges — and are deleted only after a verified mix. `start()` deletes nothing. The only deletions are `discardRecording` and `deletePermanently`, both explicit user actions (§3.2).
+
+### 4.2 Import (`RecordingImporter.swift`, `NotesStore.importRecording`)
+
+Attaches an audio or video file the user already has. Entry points: ⌘O, the sidebar `+` menu, the ⋯ menu, and drag & drop onto the note — all funnelling through `NoteEditorView.requestAudio(_:)` so there is one progress state, one error path, and one overwrite prompt.
+
+- **Formats** are whatever AVFoundation decodes: `NSOpenPanel.allowedContentTypes = [.audio, .movie]`, no hand-maintained allowlist. Verified: mp3, m4a, wav, aiff, flac, aac, caf, mp4. WebM/Ogg can't be demuxed by AVFoundation and fail with `ImportError.noAudioTrack`, as does any file with no audio track.
+- **Video works for free**: `mix` builds its composition from `loadTracks(withMediaType: .audio)`, so handing it one `.mp4` extracts the audio and drops the video.
+- **Everything is transcoded to `.m4a`**, which is load-bearing rather than tidy-minded: `GeminiClient` hardcodes the `audio/mp4` mime type (§5.1), and `AVAudioFile` / `SFSpeechURLRecognitionRequest` **cannot open a video container at all**, so on-device transcription of an `.mp4` would fail outright without it.
+- **No side tracks**, so `trackURL(for:_:)` returns nil and on-device transcription takes the unlabeled single-file path (§5.1c). Surfaced as a toast at import time when a non-Gemini engine is selected.
+- Deliberately **not cancellable**, and an untitled note takes the source file's basename as its title.
+
+> **CALLOUT — drag & drop had to be handled in AppKit, not SwiftUI.** `NSTextView` registers for file drags itself and pastes the path as text, and `PaddedTextView` sits above the SwiftUI `.onDrop` target — so a `.onDrop` on the editor never fires over the text body, which is most of the note. `PaddedTextView` overrides the dragging protocol, claims drags whose pasteboard holds a `RecordingImporter.canImport` URL, and falls through to `super` for everything else so ordinary text/PDF drags still behave.
+
+### 4.3 `mix(inputs:to:durationCheck:)`
+
+The one converter, shared by capture, import, and crash recovery. `AVMutableComposition` with each input's audio track inserted at `.zero` → `AVAssetExportSession(presetName: AVAssetExportPresetAppleM4A)` → `.m4a`, returning the verified duration (which is what `recordingDuration` stores — measured from the audio, never a wall clock, so the UI's length always matches what plays). `await session.export()` is deprecated on macOS 15 but functional.
+
+Two safety properties:
+
+- **Staging** — exports to a hidden `.dosa-export-<uuid>.m4a` sibling and only then `replaceItemAt`/`moveItem`s onto the destination. A failed export cannot destroy what was already there.
+- **Duration verification** — reads the length back off the exported file and rejects a short result, so a truncated export surfaces as a loud error with the source audio intact.
+
+> **CALLOUT — the duration check has to be looser for imports.** `DurationCheck.strict` (capture, recovery) demands within 1 s / 2%: expected duration comes from CAF files Dosa wrote, so any shortfall is real corruption. `.lenient` (import) demands only `> 0` and ≥ 50%, because container-less streams — raw ADTS `.aac`, some `.mp3`s — have no stored duration and estimate it from bitrate. A real `.aac` overshot by 17% (40.8 s claimed for 34.9 s of audio) and was rejected by the strict rule despite being perfectly good. Genuine truncation still fails under both.
+
+### 4.4 Crash recovery (`NotesStore.recoverInterruptedRecordings`)
+
+Scratch files outliving a session mean an interrupted capture (crash, force-quit, stream death). At launch `NotesStore` scans `Recordings/` for `*-{mic,system}.caf`, groups them by base name, recovers the note id from the name's UUID prefix, and mixes them into a real recording. It lands on the original note only when that takes nothing away — if the note already has a recording (or is gone), the salvage gets a new "… (Recovered)" note, because recovery must never itself destroy a recording.
 
 `AudioPlayer`: AVAudioPlayer wrapper with `play/togglePlayPause/seek/stop`, publishes `currentTime`/`duration` via a 0.25 s timer. The floating bar grows a scrub row (slider + times + ✕) whenever `playingNoteId == noteId`.
 
@@ -174,9 +210,9 @@ Two simultaneous captures, both written to temp `.caf` files during recording, m
 - **Basic** = `SFSpeechRecognizer` file recognition: partials off, punctuation on, `requiresOnDeviceRecognition` when supported (server path caps at ~1 min). Needs `NSSpeechRecognitionUsageDescription` (in `Resources/Info.plist`) + per-user Speech Recognition permission.
 
 > **CALLOUT — Basic needs macOS Dictation switched on.** The on-device recognizer *is* the Dictation model, so with Dictation off the daemon fails every request with `kLSRErrorDomain` 201 "Siri and Dictation are disabled" — `recognizer.isAvailable` still reports true, so it can't be pre-flighted. `AppleTranscriber.mapped(_:)` translates that into a `.dictationDisabled` error pointing at System Settings → Keyboard → Dictation. Not a fallback candidate: retrying with `requiresOnDeviceRecognition = false` would ship audio to Apple's servers and cap at ~1 min, defeating the point of the on-device engine.
-- **Two-way speaker attribution without diarization**: `AudioRecorder.stop` now also exports each source on its own — `<id>-mic.m4a` / `<id>-system.m4a` next to the mixed `<id>.m4a` (best-effort; a failed side export never fails the recording). `AppleTranscriber.transcribe(micURL:systemURL:…)` transcribes both, labels mic lines with the user's name (or "You") and system lines "Others", and interleaves by timestamp into the app's usual `**Speaker** [mm:ss]: …` format. Remote participants can't be told apart — they share the system track.
+- **Two-way speaker attribution without diarization**: `AudioRecorder.stop` also exports each source on its own — `<base>-mic.m4a` / `<base>-system.m4a` next to the mixed `<base>.m4a` (best-effort; a failed side export never fails the recording). `AppleTranscriber.transcribe(micURL:systemURL:…)` transcribes both, labels mic lines with the user's name (or "You") and system lines "Others", and interleaves by timestamp into the app's usual `**Speaker** [mm:ss]: …` format. Remote participants can't be told apart — they share the system track.
 - **Echo suppression**: without headphones the mic also captures the other participants, so a mic line is dropped when a system line within ±3 s shares ≥50% of its words (`isEcho`, Jaccard-ish over lowercased word sets).
-- Recordings made before per-track capture have no side files: `NotesStore.trackURL(for:_:)` returns nil and transcription falls back to the mixed file as unlabeled `[mm:ss] …` lines (word segments grouped on >1.2 s pauses / ~25 s spans). `deletePermanently`/`discardRecording` clean up side tracks via `removeRecordingFiles`.
+- Two cases have no side files — **imported files** (§4.2) and recordings made before per-track capture. `NotesStore.trackURL(for:_:)` returns nil for either, and because `GenerationManager` guards on `if let mic…, let system…`, a nil for *either* track falls through to the mixed file as unlabeled `[mm:ss] …` lines (word segments grouped on >1.2 s pauses / ~25 s spans). Gemini is unaffected — it diarizes from a single file — which is why import warns when a non-Gemini engine is selected. `deletePermanently`/`discardRecording` clean up side tracks via `removeRecordingFiles`.
 - The transcript prompt (and `{{user_name}}`) applies only to the Gemini engine.
 
 ### 5.2 GenerationManager (`GenerationManager.swift`, @MainActor)
@@ -330,7 +366,7 @@ Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) �
 
 Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page, `⌘ N` style with a space):
 
-- **⌘N** New Note (replaces New Window) · **⌘W** Close Note = clear selection, no-op on welcome (replaces Close) · **⌘K** global search · **⌘F** in-note search (rides `noteSearchRequest: UUID?`; only acts when the open note has transcript/Dosa notes).
+- **⌘N** New Note (replaces New Window) · **⌘O** Import Audio or Video (same `CommandGroup(replacing: .newItem)`; free because replacing that group removes the stock Open…) · **⌘W** Close Note = clear selection, no-op on welcome (replaces Close) · **⌘K** global search · **⌘F** in-note search (rides `noteSearchRequest: UUID?`; only acts when the open note has transcript/Dosa notes).
 - Editor-local: ⌘Z/⇧⌘Z undo/redo, Tab/⇧Tab indent/outdent, Return list continuation (§6.1).
 
 ---
@@ -359,12 +395,15 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 12. **`AVAssetExportSession.export()` deprecation** (macOS 15) — migrate to `export(to:as:)` eventually.
 13. **`fetchWorkspaceName` regex is best-effort**; falls back to "Notion".
 14. Screenshot filenames on this user's Desktop contain **narrow no-break spaces** — use globs when copying (`cp Screenshot*<time>*.png`), not typed paths.
-15. Swift concurrency: Swift 5 language mode; Sendable warnings exist and are accepted. `NotesStore` non-isolated on purpose; managers `@MainActor`.
+15. **ADTS `.aac` overstates its duration** — no container length, so it's estimated from bitrate; hence `DurationCheck.lenient` for imports — §4.3.
+16. **`NSTextView` swallows file drags** and pastes the path as text — media drops are intercepted in `PaddedTextView`, not SwiftUI — §4.2.
+17. Swift concurrency: Swift 5 language mode; Sendable warnings exist and are accepted. `NotesStore` non-isolated on purpose; managers `@MainActor`.
 
 ## 15. Verification checklist (manual)
 
 1. `./build.sh && open build/Dosa.app` — app launches, welcome shows stats + shortcut hints.
 2. Record (mic + play a video) → waveform bounces → stop → play with scrub bar.
+2b. Import: drag an `.mp4` onto a note, and repeat via ⌘O / sidebar `+` / ⋯ menu → play button with the right duration → Generate produces a transcript. Import onto a note that already has audio → prompt appears; "Import into a New Note" leaves the original untouched; after "Replace It" the previous `.m4a` is still in `Recordings/` under its old timestamped name.
 3. Generate Notes → sidebar row spinner → Dosa Notes tab with diff colors → Re-generate label; Stop mid-run cancels silently.
 4. ⌘K / ⌘F search → results jump + yellow flash (including into the transcript sheet).
 5. Themes: switch presets + Appearance in Settings, close → everything recolors at once, editors included.
