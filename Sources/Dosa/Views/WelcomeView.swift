@@ -15,14 +15,8 @@ struct WelcomeView: View {
 
     var body: some View {
         VStack(spacing: 30) {
-            Image(systemName: "waveform.and.mic")
-                .font(.system(size: 62))
-                .foregroundStyle(
-                    .linearGradient(
-                        colors: [Theme.current.highlightColor, Theme.current.highlightDeepColor],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
+            DosaMark()
+                .frame(width: 62, height: 62)
 
             VStack(spacing: 10) {
                 Text(greeting)

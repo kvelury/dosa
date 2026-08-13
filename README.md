@@ -25,7 +25,7 @@ Requirements: macOS 14+, Xcode Command Line Tools (Swift 5.9+). No external depe
 open build/Dosa.app
 ```
 
-`build.sh` compiles the Swift package, renders the app icon, assembles `build/Dosa.app`, and ad-hoc signs it. For quick iteration, `swift build` alone typechecks everything.
+`build.sh` compiles the Swift package, regenerates the brand assets (app icon + in-app mark) from the source SVGs in `Resources/Branding/`, assembles `build/Dosa.app`, and ad-hoc signs it. For quick iteration, `swift build` alone typechecks everything (but won't refresh the branding assets or produce a runnable `.app`).
 
 ### First-run setup
 
@@ -67,12 +67,18 @@ Sources/Dosa/
   DiffEngine / SearchService         word diff, search + reveal machinery
   Notion/                            OAuth (DCR+PKCE), minimal MCP client, export logic
   Views/                             SwiftUI + AppKit-backed markdown editor
+  Branding.swift                     in-app brand mark (DosaMark), tinted per appearance
+
+Resources/Branding/                  source SVGs for the app icon + in-app mark
+Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into the shipped
+                                      AppIcon.icns and dosa-mark-{light,dark}.png (run by build.sh)
 ```
 
 ## Known limitations
 
 - Gemini (Cloud) transcription requires network and a Gemini API key, and uploads audio to Google's Files API. The on-device engines (Settings → Transcription) avoid both; because the mic and system-audio tracks are kept separately, they still tell your turns from everyone else's, but can't name individual remote participants. On-Device (Advanced) needs macOS 26+, On-Device (Basic) is dictation-grade.
-- Speaker identification is inferred by the LLM from the mixed track (not channel-separated).
+- For Gemini (Cloud), speaker identification is inferred by the LLM from the mixed track (not channel-separated); the on-device engines split mic vs. system audio instead (see above).
+- The menu-bar template icons in `Resources/Branding/` (`dosa-menubarTemplate.svg`, `dosa-menubarRecordingTemplate.svg`) aren't wired up yet — Dosa has no menu-bar-extra status item today, so they're reserved for if/when that's built.
 - Ad-hoc signing means permission grants can reset on rebuild.
 - Notion sync is one-way (export/update); bi-directional sync is designed but not built (see the design doc §10.4).
 - Anthropic/OpenAI provider tabs in Settings are stubs; Gemini and DeepSeek are the working providers.

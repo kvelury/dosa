@@ -74,11 +74,15 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
                 .help("LLM provider API key, prompts, and app options")
-                (Text("Dosa v\(Self.appVersion)")
-                    + Text("  ·  ")
-                    + Text(activeModelName).italic())
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 5) {
+                    DosaMark()
+                        .frame(width: 11, height: 11)
+                    (Text("Dosa v\(Self.appVersion)")
+                        + Text("  ·  ")
+                        + Text(activeModelName).italic())
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
