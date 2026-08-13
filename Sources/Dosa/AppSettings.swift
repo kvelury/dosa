@@ -151,6 +151,13 @@ enum AppSettings {
     static let defaultModel = "gemini-3.5-flash"
     static let availableModels = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-pro-latest", "gemini-3-flash-preview"]
 
+    /// Transcription always runs on the cheapest flash tier, whatever model is
+    /// picked for note generation: speech-to-text is the token-heavy step (a
+    /// long meeting is a lot of audio input), the flash models handle it well,
+    /// and pro-tier rates buy nothing here. It's also the tier verified to work
+    /// with audio at all — see the model-landscape note above.
+    static let transcriptionModel = "gemini-3.5-flash"
+
     /// Tried in order when the selected model fails with a server error, a
     /// retired-model 404, or a quota 429.
     static let fallbackModels = ["gemini-3.5-flash", "gemini-3-flash-preview", "gemini-flash-latest"]

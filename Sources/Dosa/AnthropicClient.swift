@@ -26,6 +26,8 @@ struct AnthropicClient {
 
         var errorDescription: String? {
             switch self {
+            case .http(401, _):
+                return "Anthropic rejected your API key. Check it in Settings → LLM Provider → Anthropic, or generate a new one at platform.claude.com/settings/keys."
             case .http(let status, _):
                 return "The Anthropic API returned an error (HTTP \(status))."
             case .malformedResponse:

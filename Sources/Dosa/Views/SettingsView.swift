@@ -268,6 +268,12 @@ struct SettingsView: View {
                                 Text(name)
                             }
                         }
+                        Text("Applies to note generation. Transcription always uses \(AppSettings.transcriptionModel) — the cheapest tier that handles audio.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else if selectedTab == "Anthropic" {
                         SecureField("API Key", text: $anthropicAPIKey)
                         Link("Get an API key at platform.claude.com →",

@@ -31,7 +31,7 @@ open build/Dosa.app
 
 1. **Permissions** — the first recording prompts for **Microphone**; system audio needs **Screen & System Audio Recording** (grant in System Settings, then relaunch Dosa). Because builds are ad-hoc signed, macOS may re-prompt after rebuilds.
 2. **LLM provider API key** — Settings (bottom-left of the sidebar) → LLM Provider → paste your key. Three providers generate notes, each defaulting to its cheapest/fastest model:
-   - **Gemini** ([get a key free](https://ai.google.dev/gemini-api/docs/api-key)) — default `gemini-3.5-flash`, with an automatic fallback chain if a model errors. The only provider that can also transcribe.
+   - **Gemini** ([get a key free](https://ai.google.dev/gemini-api/docs/api-key)) — default `gemini-3.5-flash`, with an automatic fallback chain if a model errors. The only provider that can also transcribe; transcription always runs on `gemini-3.5-flash` regardless of the model picked here, since audio is the token-heavy step and the flash tier handles it well.
    - **Anthropic** ([get a key](https://platform.claude.com/settings/keys)) — default `claude-haiku-4-5`, or pick `claude-sonnet-5` / `claude-opus-5`.
    - **DeepSeek** ([get a key](https://platform.deepseek.com/api_keys)) — default `deepseek-v4-flash`, or `deepseek-v4-pro`.
 

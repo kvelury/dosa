@@ -42,9 +42,11 @@ final class GenerationManager: ObservableObject {
         let transcriptionEngine = AppSettings.resolvedTranscriptionEngine
         // For Gemini-engine transcription only. Neither Anthropic nor DeepSeek
         // accepts audio, so the alternatives are the on-device Apple engines.
+        // Pinned to the cheap flash tier rather than the user's generation
+        // model — see AppSettings.transcriptionModel.
         let geminiTranscriber = GeminiClient(
             apiKey: geminiKey,
-            model: AppSettings.resolvedModel(for: "Gemini")
+            model: AppSettings.transcriptionModel
         )
         let generateText: (String) async throws -> String
         switch provider {
