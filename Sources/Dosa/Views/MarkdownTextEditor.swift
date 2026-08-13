@@ -17,7 +17,55 @@ struct TextHighlight: Equatable {
 final class PaddedTextView: NSTextView {
     var topPadding: CGFloat = 12
 
+    /// An audio/video file was dropped on the text. NSTextView would otherwise accept
+    /// the drag itself and paste the file's path as text, so media drops are
+    /// intercepted here — this view sits above the editor and wins the drag.
+    var onMediaFileDrop: ((URL) -> Void)?
+    /// Whether an importable file is currently hovering, so the editor can show the
+    /// same drop highlight it shows for drags outside the text area.
+    var onMediaDragChanged: ((Bool) -> Void)?
+
     private var clipObserver: NSObjectProtocol?
+
+    private func importableURL(from info: NSDraggingInfo) -> URL? {
+        let urls = info.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]
+        return urls?.first(where: RecordingImporter.canImport)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard importableURL(from: sender) != nil else { return super.draggingEntered(sender) }
+        onMediaDragChanged?(true)
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard importableURL(from: sender) != nil else { return super.draggingUpdated(sender) }
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onMediaDragChanged?(false)
+        super.draggingExited(sender)
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        onMediaDragChanged?(false)
+        super.draggingEnded(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        importableURL(from: sender) != nil ? true : super.prepareForDragOperation(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let url = importableURL(from: sender) else { return super.performDragOperation(sender) }
+        onMediaDragChanged?(false)
+        onMediaFileDrop?(url)
+        return true
+    }
 
     private var activeUndoManager: UndoManager? {
         (delegate as? NSTextViewDelegate)?.undoManager?(for: self) ?? undoManager
@@ -95,6 +143,10 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// Extra scrollable space at the bottom so content can clear overlaid chrome
     /// (like the floating action bar).
     var bottomContentInset: CGFloat = 0
+    /// Handles an audio/video file dropped on the text, which the text view would
+    /// otherwise paste as a file path.
+    var onMediaFileDrop: ((URL) -> Void)?
+    var onMediaDragChanged: ((Bool) -> Void)?
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = PaddedTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
@@ -125,6 +177,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         textView.isEditable = isEditable
         textView.string = text
+        textView.onMediaFileDrop = onMediaFileDrop
+        textView.onMediaDragChanged = onMediaDragChanged
         MarkdownStyler.style(textView, diffBase: diffAgainst)
         applyHighlight(to: textView, coordinator: context.coordinator)
         return scrollView
@@ -134,6 +188,11 @@ struct MarkdownTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = nsView.documentView as? NSTextView else { return }
         textView.isEditable = isEditable
+        if let padded = textView as? PaddedTextView {
+            // Re-bound each update: the closures capture view state that changes.
+            padded.onMediaFileDrop = onMediaFileDrop
+            padded.onMediaDragChanged = onMediaDragChanged
+        }
         let fingerprint = Theme.styleFingerprint
         if textView.string != text {
             let selection = textView.selectedRange()

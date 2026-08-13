@@ -21,7 +21,7 @@ struct WelcomeView: View {
             VStack(spacing: 10) {
                 Text(greeting)
                     .font(.largeTitle.bold())
-                Text("Record your meetings straight from the Mac's audio — Zoom, Meet, Teams, huddles, anything — jot quick notes, and let Dosa turn them into polished meeting notes.")
+                Text("Record meetings straight from your Mac's audio — Zoom, Meet, Teams, Huddles, anything — jot quick notes, and let Dosa turn them into polished meeting notes.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -42,8 +42,9 @@ struct WelcomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.current.editorBackgroundColor)
         .overlay(alignment: .bottom) {
-            HStack(spacing: 22) {
+            HStack(spacing: 18) {
                 ShortcutHint(keys: "⌘ N", label: "New note")
+                ShortcutHint(keys: "⌘ O", label: "Import file")
                 ShortcutHint(keys: "⌘ K", label: "Search everywhere")
                 ShortcutHint(keys: "⌘ F", label: "Search in note")
                 ShortcutHint(keys: "⌘ W", label: "Close note")
@@ -68,6 +69,10 @@ private struct ShortcutHint: View {
             Text(label)
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
+                // Five hints are a tight fit in a narrow window; shrink rather than clip.
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

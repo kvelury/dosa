@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct NoteEditorView: View {
     @EnvironmentObject private var store: NotesStore
@@ -22,7 +23,10 @@ struct NoteEditorView: View {
     @State private var showTranscript = false
     @State private var confirmDelete = false
     @State private var confirmDiscardRecording = false
-    @State private var confirmReplaceRecording = false
+    /// The action waiting on the user's answer to the "already has content" prompt.
+    @State private var pendingReplacement: PendingNoteAction.Kind?
+    @State private var isImporting = false
+    @State private var isDropTargeted = false
     @State private var localError: String?
     @State private var localErrorDetail: String?
     @State private var toast: String?
@@ -57,10 +61,13 @@ struct NoteEditorView: View {
                 viewMode = .aiNotes
             }
             handleReveal(search.pendingReveal)
-            if appState.pendingRecordNoteId == noteId {
-                appState.pendingRecordNoteId = nil
-                beginRecording()
+            if let pending = appState.pendingNoteAction, pending.noteId == noteId {
+                appState.pendingNoteAction = nil
+                begin(pending.kind)
             }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleFileDrop(providers)
         }
         .onChange(of: search.pendingReveal) { _, newValue in
             handleReveal(newValue)
@@ -80,6 +87,14 @@ struct NoteEditorView: View {
                 .padding(.top, 2)
                 .padding(.trailing, 14)
         }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Theme.current.accentColor, lineWidth: 3)
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
+        }
         .sheet(isPresented: $showTranscript) {
             TranscriptView(note: current, highlight: transcriptHighlight)
         }
@@ -95,13 +110,17 @@ struct NoteEditorView: View {
         }
         .confirmationDialog(
             "This note already has \(existingWorkDescription(current) ?? "content")",
-            isPresented: $confirmReplaceRecording
+            isPresented: Binding(
+                get: { pendingReplacement != nil },
+                set: { if !$0 { pendingReplacement = nil } }
+            )
         ) {
-            Button("Record in a New Note") { recordInNewNote() }
-            Button("Replace It", role: .destructive) { beginRecording() }
+            let kind = pendingReplacement ?? .record
+            Button(kind.newNoteButtonTitle) { startInNewNote(kind) }
+            Button("Replace It", role: .destructive) { begin(kind) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\(replaceWarning(current)) Recording in a new note keeps this one exactly as it is.")
+            Text("\(replaceWarning(current, kind: pendingReplacement ?? .record)) \(pendingReplacement?.newNoteExplanation ?? "")")
         }
         .confirmationDialog("Discard this recording?", isPresented: $confirmDiscardRecording) {
             Button("Discard Recording", role: .destructive) {
@@ -184,7 +203,9 @@ struct NoteEditorView: View {
                     text: enhancedBinding(note: note),
                     diffAgainst: current.manualText,
                     highlight: editorHighlight,
-                    bottomContentInset: 74
+                    bottomContentInset: 74,
+                    onMediaFileDrop: { requestAudio(.importFile($0)) },
+                    onMediaDragChanged: { isDropTargeted = $0 }
                 )
             }
         } else {
@@ -205,7 +226,9 @@ struct NoteEditorView: View {
                     text: note.manualText,
                     isEditable: current.enhancedMarkdown == nil,
                     highlight: editorHighlight,
-                    bottomContentInset: 74
+                    bottomContentInset: 74,
+                    onMediaFileDrop: { requestAudio(.importFile($0)) },
+                    onMediaDragChanged: { isDropTargeted = $0 }
                 )
                 .padding(.top, 2)
             }
@@ -273,6 +296,13 @@ struct NoteEditorView: View {
                 Text(TimeFormatting.clock(recorder.elapsed))
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(.red)
+            }
+            if isImporting {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Importing…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             Divider()
                 .frame(height: 22)
@@ -442,6 +472,13 @@ struct NoteEditorView: View {
                 }
             }
             Divider()
+            Button(action: startImport) {
+                Label("Import Audio or Video…", systemImage: "square.and.arrow.down")
+            }
+            .disabled(recorder.isRecording || isImporting)
+            .help(recorder.isRecording
+                  ? "Finish the recording first"
+                  : "Attach an audio or video file you already have (you can also drop one onto the note)")
             if current.recordingFileName != nil {
                 Button {
                     if var fresh = store.note(id: noteId) {
@@ -509,8 +546,8 @@ struct NoteEditorView: View {
         )
     }
 
-    /// What recording would destroy if it ran on this note, phrased for the prompt.
-    /// Nil when the note is empty and recording is safe to start immediately.
+    /// What attaching new audio would destroy on this note, phrased for the prompt.
+    /// Nil when the note is empty and the action is safe to run immediately.
     private func existingWorkDescription(_ note: Note) -> String? {
         let hasRecording = note.recordingFileName != nil
         let hasNotes = note.transcript != nil || note.enhancedMarkdown != nil
@@ -522,21 +559,38 @@ struct NoteEditorView: View {
         }
     }
 
-    private func replaceWarning(_ note: Note) -> String {
-        note.recordingFileName != nil
-            ? "Recording again here overwrites the audio and clears the transcript."
-            : "Recording again here clears the transcript this note's generated notes came from."
+    private func replaceWarning(_ note: Note, kind: PendingNoteAction.Kind) -> String {
+        let verb = kind.isImport ? "Importing here" : "Recording again here"
+        return note.recordingFileName != nil
+            ? "\(verb) replaces the audio and clears the transcript."
+            : "\(verb) clears the transcript this note's generated notes came from."
+    }
+
+    /// The single gate in front of both ways of attaching audio: never write over
+    /// existing work without asking first.
+    private func requestAudio(_ kind: PendingNoteAction.Kind) {
+        guard let current = store.note(id: noteId) else { return }
+        if existingWorkDescription(current) != nil {
+            pendingReplacement = kind
+            return
+        }
+        begin(kind)
     }
 
     private func startRecording() {
-        guard let current = store.note(id: noteId) else { return }
-        // Recording writes over this note's audio and clears its transcript, so never
-        // start on top of existing work without asking first.
-        if existingWorkDescription(current) != nil {
-            confirmReplaceRecording = true
-            return
+        requestAudio(.record)
+    }
+
+    private func startImport() {
+        guard let url = RecordingImporter.pickFile(for: .currentNote) else { return }
+        requestAudio(.importFile(url))
+    }
+
+    private func begin(_ kind: PendingNoteAction.Kind) {
+        switch kind {
+        case .record: beginRecording()
+        case .importFile(let url): beginImport(from: url)
         }
-        beginRecording()
     }
 
     private func beginRecording() {
@@ -550,14 +604,63 @@ struct NoteEditorView: View {
         }
     }
 
-    /// Leaves this note exactly as it is and records into a fresh note in the same
+    private func beginImport(from url: URL) {
+        player.stop()
+        isImporting = true
+        Task {
+            defer { isImporting = false }
+            do {
+                try await store.importRecording(from: url, into: noteId)
+                showToast(importToastMessage(for: url), duration: importToastDuration)
+            } catch {
+                localError = error.localizedDescription
+                localErrorDetail = (error as? DetailedError)?.errorDetail
+            }
+        }
+    }
+
+    /// Imported files have no `-mic`/`-system` side tracks, so on-device transcription
+    /// falls back to unlabeled lines. Say so at import time rather than letting it be a
+    /// surprise in the transcript.
+    private var importLosesSpeakerLabels: Bool {
+        AppSettings.resolvedTranscriptionEngine != .gemini
+    }
+
+    private var importToastDuration: TimeInterval { importLosesSpeakerLabels ? 6.5 : 2.8 }
+
+    private func importToastMessage(for url: URL) -> String {
+        let name = url.lastPathComponent
+        guard importLosesSpeakerLabels else { return "Imported \(name)" }
+        return "Imported \(name) — on-device transcription can't separate speakers on imported files. Switch Transcription to Gemini in Settings for speaker names."
+    }
+
+    /// Leaves this note exactly as it is and starts over in a fresh note in the same
     /// folder. The new editor picks the request up in `onAppear`.
-    private func recordInNewNote() {
+    private func startInNewNote(_ kind: PendingNoteAction.Kind) {
         player.stop()
         let folderId = store.note(id: noteId)?.folderId
         let note = store.createNote(in: folderId)
-        appState.pendingRecordNoteId = note.id
+        appState.pendingNoteAction = PendingNoteAction(noteId: note.id, kind: kind)
         selectedNoteId = note.id
+    }
+
+    private func handleFileDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !recorder.isRecording, !isImporting,
+              let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) })
+        else { return false }
+
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url else { return }
+            Task { @MainActor in
+                guard RecordingImporter.canImport(url) else {
+                    // Say why rather than appearing to accept the file and doing nothing.
+                    localError = "\"\(url.lastPathComponent)\" isn't an audio or video file Dosa can import."
+                    return
+                }
+                requestAudio(.importFile(url))
+            }
+        }
+        return true
     }
 
     private func stopRecording() {
@@ -645,10 +748,10 @@ struct NoteEditorView: View {
         }
     }
 
-    private func showToast(_ message: String) {
+    private func showToast(_ message: String, duration: TimeInterval = 2.8) {
         withAnimation { toast = message }
         Task {
-            try? await Task.sleep(nanoseconds: 2_800_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             withAnimation { toast = nil }
         }
     }
