@@ -3,7 +3,9 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var recorder: AudioRecorder
     @State private var showSettings = false
+    @State private var interruptionMessage: String?
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
 
@@ -47,6 +49,27 @@ struct ContentView: View {
         }
         .sheet(isPresented: $appState.showGlobalSearch) {
             GlobalSearchView(selectedNoteId: singleSelectionBinding)
+        }
+        .sheet(isPresented: Binding(
+            get: { interruptionMessage != nil },
+            set: { if !$0 { interruptionMessage = nil } }
+        )) {
+            ErrorDialogView(message: interruptionMessage ?? "", detail: nil)
+        }
+        // A capture that dies on its own still hands back whatever it recorded;
+        // save it to the note and select it so the audio is never stranded.
+        .onChange(of: recorder.interruption) { _, interruption in
+            guard let interruption else { return }
+            recorder.interruption = nil
+            if let recovered = interruption.recovered {
+                store.setRecording(
+                    noteId: recovered.noteId,
+                    fileName: recovered.fileName,
+                    duration: recovered.duration
+                )
+                appState.selectedNoteIds = [recovered.noteId]
+            }
+            interruptionMessage = interruption.message
         }
         .onAppear {
             AppSettings.applyAppearance()

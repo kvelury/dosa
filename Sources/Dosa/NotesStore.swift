@@ -31,6 +31,7 @@ final class NotesStore: ObservableObject {
         try? fm.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true)
         load()
         purgeExpiredDeletedNotes()
+        recoverInterruptedRecordings()
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -84,8 +85,8 @@ final class NotesStore: ObservableObject {
     }
 
     @discardableResult
-    func createNote(in folderId: UUID? = nil) -> Note {
-        let note = Note(folderId: folderId)
+    func createNote(in folderId: UUID? = nil, title: String = "") -> Note {
+        let note = Note(title: title, folderId: folderId)
         notes.insert(note, at: 0)
         scheduleSave()
         return note
@@ -139,7 +140,7 @@ final class NotesStore: ObservableObject {
 
     func deletePermanently(_ id: UUID) {
         guard let note = note(id: id) else { return }
-        removeRecordingFiles(for: note)
+        removeRecordingFiles(for: note, includingHistory: true)
         notes.removeAll { $0.id == id }
         scheduleSave()
     }
@@ -178,10 +179,63 @@ final class NotesStore: ObservableObject {
         return recordingsDirectory.appendingPathComponent(fileName)
     }
 
+    /// A fresh, never-reused name for a new recording, e.g.
+    /// `<noteId>-20260813-145830-417.m4a`.
+    ///
+    /// This is what makes overwriting structurally impossible rather than merely
+    /// discouraged: because every recording gets its own path, no code path — a
+    /// second Record click, a replace, a crash recovery — can ever write over
+    /// audio that already exists. The note id prefix keeps a file traceable back
+    /// to its note, which is how an interrupted capture is matched up at launch.
+    func newRecordingFileName(for noteId: UUID) -> String {
+        var name = "\(noteId.uuidString)-\(Self.stampFormatter.string(from: Date())).m4a"
+        // Belt and braces: if a name somehow collides, take a different one rather
+        // than returning a path that would overwrite an existing recording.
+        while FileManager.default.fileExists(
+            atPath: recordingsDirectory.appendingPathComponent(name).path
+        ) {
+            name = "\(noteId.uuidString)-\(UUID().uuidString).m4a"
+        }
+        return name
+    }
+
+    private static let stampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    /// The note a recording file belongs to, read back from its name prefix.
+    static func noteId(forRecordingNamed fileName: String) -> UUID? {
+        UUID(uuidString: String(fileName.prefix(36)))
+    }
+
     /// Side-track URL for a recording file name, e.g. `<id>-mic.m4a`.
     func trackURL(forRecordingNamed fileName: String, _ track: RecordingTrack) -> URL {
         let base = (fileName as NSString).deletingPathExtension
         return recordingsDirectory.appendingPathComponent("\(base)\(track.rawValue).m4a")
+    }
+
+    /// Raw capture file written while a recording is in progress, e.g. `<id>-mic.caf`.
+    /// These live here rather than the temp directory so an interrupted meeting is
+    /// still on disk after a crash or relaunch, and can be recovered.
+    func scratchURL(forRecordingNamed fileName: String, _ track: RecordingTrack) -> URL {
+        let base = (fileName as NSString).deletingPathExtension
+        return recordingsDirectory.appendingPathComponent("\(base)\(track.rawValue).caf")
+    }
+
+    func recordingDestination(for noteId: UUID) -> AudioRecorder.Destination {
+        let fileName = newRecordingFileName(for: noteId)
+        return AudioRecorder.Destination(
+            noteId: noteId,
+            fileName: fileName,
+            output: recordingsDirectory.appendingPathComponent(fileName),
+            micTrack: trackURL(forRecordingNamed: fileName, .mic),
+            systemTrack: trackURL(forRecordingNamed: fileName, .system),
+            micScratch: scratchURL(forRecordingNamed: fileName, .mic),
+            systemScratch: scratchURL(forRecordingNamed: fileName, .system)
+        )
     }
 
     /// Side-track URL for a note, or nil when that track wasn't kept (older
@@ -192,13 +246,90 @@ final class NotesStore: ObservableObject {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    private func removeRecordingFiles(for note: Note) {
+    /// Deletes a note's recording files. Only ever called from the two paths where the
+    /// user explicitly asked for it — Discard Recording, and permanently deleting a
+    /// note — never as a side effect of recording.
+    ///
+    /// `includingHistory` sweeps every file keyed to the note, including earlier
+    /// recordings the user replaced and interrupted captures that would otherwise be
+    /// recovered onto a new note. That's right when the note itself is going away, but
+    /// discarding one recording must not quietly take the older ones with it.
+    private func removeRecordingFiles(for note: Note, includingHistory: Bool) {
+        let fm = FileManager.default
         if let url = recordingURL(for: note) {
-            try? FileManager.default.removeItem(at: url)
+            try? fm.removeItem(at: url)
         }
-        guard let fileName = note.recordingFileName else { return }
+        if let fileName = note.recordingFileName {
+            for track in RecordingTrack.allCases {
+                try? fm.removeItem(at: trackURL(forRecordingNamed: fileName, track))
+                try? fm.removeItem(at: scratchURL(forRecordingNamed: fileName, track))
+            }
+        }
+        guard includingHistory else { return }
+        let prefix = note.id.uuidString
+        let entries = (try? fm.contentsOfDirectory(at: recordingsDirectory, includingPropertiesForKeys: nil)) ?? []
+        for url in entries where url.lastPathComponent.hasPrefix(prefix) {
+            try? fm.removeItem(at: url)
+        }
+    }
+
+    /// A recording that never reached `stop()` — the app quit or crashed mid-meeting,
+    /// or the system audio stream died — leaves its raw capture files behind. Mix them
+    /// into a real recording at launch so captured audio is never silently lost.
+    ///
+    /// When the note already has a recording, the salvaged audio lands on a new note
+    /// instead of replacing it: recovery must never itself destroy a recording.
+    private func recoverInterruptedRecordings() {
+        let fm = FileManager.default
+        let entries = (try? fm.contentsOfDirectory(at: recordingsDirectory, includingPropertiesForKeys: nil)) ?? []
+
+        // Group leftover scratch files by the recording they were captured for.
+        var pending: [String: [RecordingTrack: URL]] = [:]
+        for url in entries where url.pathExtension == "caf" {
+            let name = url.deletingPathExtension().lastPathComponent
+            guard let track = RecordingTrack.allCases.first(where: { name.hasSuffix($0.rawValue) }) else { continue }
+            pending[String(name.dropLast(track.rawValue.count)), default: [:]][track] = url
+        }
+        guard !pending.isEmpty else { return }
+
+        Task { @MainActor [weak self] in
+            for (base, scratch) in pending.sorted(by: { $0.key < $1.key }) {
+                await self?.recover(base: base, scratch: scratch)
+            }
+        }
+    }
+
+    @MainActor
+    private func recover(base: String, scratch: [RecordingTrack: URL]) async {
+        let origin = Self.noteId(forRecordingNamed: base).flatMap { note(id: $0) }
+        // Land on the original note only when doing so takes nothing away. If it
+        // already has a recording, the salvage gets its own note — recovery must
+        // never be the thing that destroys a recording.
+        let target: Note
+        if let origin, origin.recordingFileName == nil, !origin.isDeleted {
+            target = origin
+        } else {
+            target = createNote(
+                in: origin?.folderId,
+                title: origin.map { "\($0.displayTitle) (Recovered)" } ?? "Recovered Recording"
+            )
+        }
+
+        let fileName = newRecordingFileName(for: target.id)
+        let inputs = RecordingTrack.allCases.compactMap { scratch[$0] }
+        guard let duration = try? await AudioRecorder.mix(
+            inputs: inputs,
+            to: recordingsDirectory.appendingPathComponent(fileName)
+        ) else { return }
+
         for track in RecordingTrack.allCases {
-            try? FileManager.default.removeItem(at: trackURL(forRecordingNamed: fileName, track))
+            guard let url = scratch[track] else { continue }
+            _ = try? await AudioRecorder.mix(inputs: [url], to: trackURL(forRecordingNamed: fileName, track))
+        }
+
+        setRecording(noteId: target.id, fileName: fileName, duration: duration)
+        for url in inputs {
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
@@ -219,7 +350,7 @@ final class NotesStore: ObservableObject {
 
     func discardRecording(_ id: UUID) {
         guard var note = note(id: id) else { return }
-        removeRecordingFiles(for: note)
+        removeRecordingFiles(for: note, includingHistory: false)
         note.recordingFileName = nil
         note.recordingDuration = nil
         note.transcript = nil

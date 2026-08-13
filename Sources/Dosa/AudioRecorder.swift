@@ -10,8 +10,13 @@ import CoreGraphics
 ///   2. system output audio (what everyone else says — Zoom, Meet, Teams, Slack huddles,
 ///      browser tabs, video files, anything the Mac plays), via ScreenCaptureKit's
 ///      OS-level audio loopback
-/// Both streams are written to temp files while recording, then mixed into a single
+/// Both streams are written to scratch files while recording, then mixed into a single
 /// .m4a when the recording stops.
+///
+/// Captured audio is treated as irreplaceable: scratch files are keyed by note and kept
+/// in the app's own directory (not the temp dir, which the OS purges), a session that
+/// dies on its own is salvaged rather than dropped, and nothing already on disk is
+/// deleted until its replacement has been written successfully.
 final class AudioRecorder: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var elapsed: TimeInterval = 0
@@ -19,8 +24,48 @@ final class AudioRecorder: NSObject, ObservableObject {
     /// Rolling window of recent audio levels (0-1), newest last — drives the
     /// live waveform so the user can see that audio is actually being captured.
     @Published var levelHistory: [Float] = AudioRecorder.emptyLevels
+    /// Set when a capture ends on its own instead of via `stop()` — most often the
+    /// system audio stream dying mid-meeting. Whatever was captured is salvaged
+    /// first; the app observes this to save it and tell the user.
+    @Published var interruption: Interruption?
 
     static let emptyLevels: [Float] = Array(repeating: 0, count: 7)
+
+    /// Every file a recording session touches. Scratch files are keyed by note so two
+    /// notes can never clobber each other's audio, and they survive a relaunch so an
+    /// interrupted meeting can be recovered.
+    struct Destination {
+        let noteId: UUID
+        let fileName: String
+        let output: URL
+        let micTrack: URL
+        let systemTrack: URL
+        let micScratch: URL
+        let systemScratch: URL
+    }
+
+    /// A finished recording. `duration` is measured from the audio itself rather than
+    /// the wall clock, so the time shown in the UI always matches what plays back.
+    struct Recording {
+        let noteId: UUID
+        let fileName: String
+        let duration: TimeInterval
+    }
+
+    struct Interruption: Identifiable, Equatable {
+        let id = UUID()
+        let message: String
+        /// The salvaged audio, or nil when nothing could be recovered.
+        let recovered: RecoveredRecording?
+
+        static func == (lhs: Interruption, rhs: Interruption) -> Bool { lhs.id == rhs.id }
+    }
+
+    struct RecoveredRecording: Equatable {
+        let noteId: UUID
+        let fileName: String
+        let duration: TimeInterval
+    }
 
     private var stream: SCStream?
     private var micEngine: AVAudioEngine?
@@ -31,9 +76,13 @@ final class AudioRecorder: NSObject, ObservableObject {
     private var levelTimer: Timer?
     private var startedAt: Date?
     private var peakLevel: Float = 0   // written on sampleQueue only
+    private var destination: Destination?
 
-    private var systemURL: URL { FileManager.default.temporaryDirectory.appendingPathComponent("dosa-system.caf") }
-    private var micURL: URL { FileManager.default.temporaryDirectory.appendingPathComponent("dosa-mic.caf") }
+    /// Guards the hand-off between a user-driven `stop()` and a stream that dies on
+    /// its own: whichever gets here first owns finishing the session, so the audio is
+    /// never mixed twice or dropped by both paths assuming the other handled it.
+    private let stateLock = NSLock()
+    private var sessionActive = false
 
     enum RecorderError: LocalizedError {
         case micPermissionDenied
@@ -55,30 +104,34 @@ final class AudioRecorder: NSObject, ObservableObject {
         }
     }
 
-    func start(noteId: UUID) async throws {
-        guard !isRecording else { return }
-
-        let micGranted = await AVCaptureDevice.requestAccess(for: .audio)
-        guard micGranted else { throw RecorderError.micPermissionDenied }
-
-        if !CGPreflightScreenCaptureAccess() {
-            CGRequestScreenCaptureAccess()
-            throw RecorderError.screenPermissionDenied
-        }
-
-        try? FileManager.default.removeItem(at: systemURL)
-        try? FileManager.default.removeItem(at: micURL)
+    func start(destination: Destination) async throws {
+        // Claimed synchronously, before the first `await`. `isRecording` doesn't flip
+        // until setup finishes, and setup can sit for seconds on permission prompts —
+        // a second Record click landing in that window would otherwise start a whole
+        // second capture on top of the first.
+        guard beginSession() else { return }
 
         do {
-            try startMicCapture()
+            let micGranted = await AVCaptureDevice.requestAccess(for: .audio)
+            guard micGranted else { throw RecorderError.micPermissionDenied }
+
+            if !CGPreflightScreenCaptureAccess() {
+                CGRequestScreenCaptureAccess()
+                throw RecorderError.screenPermissionDenied
+            }
+
+            self.destination = destination
+            try startMicCapture(to: destination.micScratch)
             try await startSystemAudioCapture()
         } catch {
             teardownCapture()
+            self.destination = nil
+            _ = claimSession()
             throw error
         }
 
         await MainActor.run {
-            self.recordingNoteId = noteId
+            self.recordingNoteId = destination.noteId
             self.isRecording = true
             self.elapsed = 0
             self.levelHistory = Self.emptyLevels
@@ -91,6 +144,24 @@ final class AudioRecorder: NSObject, ObservableObject {
                 self?.shiftLevelHistory()
             }
         }
+    }
+
+    /// Returns false when a session is already in flight, so the caller must bail out.
+    private func beginSession() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !sessionActive else { return false }
+        sessionActive = true
+        return true
+    }
+
+    /// Returns true to the first caller to claim the session; everyone after gets false.
+    private func claimSession() -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard sessionActive else { return false }
+        sessionActive = false
+        return true
     }
 
     private func shiftLevelHistory() {
@@ -130,14 +201,20 @@ final class AudioRecorder: NSObject, ObservableObject {
         return count > 0 ? sqrt(sum / Float(count)) : 0
     }
 
-    /// Stops recording and writes the mixed `.m4a` to `outputURL`. When
-    /// `micTrackURL`/`systemTrackURL` are given, each source is also kept as
-    /// its own `.m4a` — transcribing them separately is what lets on-device
-    /// transcription attribute speech to the user vs. everyone else.
-    func stop(outputURL: URL, micTrackURL: URL? = nil, systemTrackURL: URL? = nil) async throws -> TimeInterval {
-        guard isRecording else { return 0 }
-        let duration = startedAt.map { Date().timeIntervalSince($0) } ?? 0
+    /// Stops recording and writes the mixed `.m4a` to the destination. Each source is
+    /// also kept as its own `.m4a` — transcribing them separately is what lets
+    /// on-device transcription attribute speech to the user vs. everyone else.
+    func stop() async throws -> Recording {
+        guard let destination, claimSession() else {
+            throw RecorderError.exportFailed("This recording has already finished.")
+        }
+        let duration = try await finish(destination: destination)
+        return Recording(noteId: destination.noteId, fileName: destination.fileName, duration: duration)
+    }
 
+    /// Tears the capture down, mixes what was captured, and clears the scratch files.
+    /// The caller must already have won `claimSession()`.
+    private func finish(destination: Destination) async throws -> TimeInterval {
         await MainActor.run {
             self.timer?.invalidate()
             self.timer = nil
@@ -164,26 +241,47 @@ final class AudioRecorder: NSObject, ObservableObject {
             }
         }
 
-        try await Self.mix(inputs: [micURL, systemURL], to: outputURL)
+        let duration = try await Self.mix(
+            inputs: [destination.micScratch, destination.systemScratch],
+            to: destination.output
+        )
 
         // Best-effort: a failed side track only costs speaker attribution, so
         // it must never fail the recording itself.
-        if let micTrackURL {
-            try? await Self.mix(inputs: [micURL], to: micTrackURL)
-        }
-        if let systemTrackURL {
-            try? await Self.mix(inputs: [systemURL], to: systemTrackURL)
-        }
+        _ = try? await Self.mix(inputs: [destination.micScratch], to: destination.micTrack)
+        _ = try? await Self.mix(inputs: [destination.systemScratch], to: destination.systemTrack)
 
-        await MainActor.run { self.recordingNoteId = nil }
+        // Only now that the mix is safely on disk is the raw capture disposable.
+        try? FileManager.default.removeItem(at: destination.micScratch)
+        try? FileManager.default.removeItem(at: destination.systemScratch)
+
+        await MainActor.run {
+            self.recordingNoteId = nil
+            self.destination = nil
+        }
         return duration
     }
 
-    private func startMicCapture() throws {
+    /// Called when the capture dies without the user asking it to. Salvages whatever
+    /// was recorded rather than leaving the user with nothing.
+    private func handleUnexpectedStop(message: String) {
+        guard let destination, claimSession() else { return }
+        Task {
+            let duration = try? await finish(destination: destination)
+            let recovered = duration.map {
+                RecoveredRecording(noteId: destination.noteId, fileName: destination.fileName, duration: $0)
+            }
+            await MainActor.run {
+                self.interruption = Interruption(message: message, recovered: recovered)
+            }
+        }
+    }
+
+    private func startMicCapture(to url: URL) throws {
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        let file = try AVAudioFile(forWriting: micURL, settings: format.settings)
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
         micFile = file
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             guard let self else { return }
@@ -234,8 +332,11 @@ final class AudioRecorder: NSObject, ObservableObject {
         }
     }
 
-    private static func mix(inputs: [URL], to outputURL: URL) async throws {
-        try? FileManager.default.removeItem(at: outputURL)
+    /// Mixes `inputs` into `outputURL` and returns the resulting duration. The export
+    /// runs to a staging file and only replaces `outputURL` once it has succeeded, so
+    /// a failed export can never destroy the recording that was already there.
+    @discardableResult
+    static func mix(inputs: [URL], to outputURL: URL) async throws -> TimeInterval {
         let composition = AVMutableComposition()
         var addedTrack = false
 
@@ -255,26 +356,52 @@ final class AudioRecorder: NSObject, ObservableObject {
         guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
             throw RecorderError.exportFailed("Could not create the audio export session.")
         }
-        session.outputURL = outputURL
+
+        let staging = outputURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".dosa-export-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        session.outputURL = staging
         session.outputFileType = .m4a
         await session.export()
         if session.status != .completed {
             throw RecorderError.exportFailed(session.error?.localizedDescription ?? "The audio export did not complete.")
         }
+
+        // Read the duration back off the exported file rather than trusting the
+        // export. A truncated result has to surface as a loud failure — with the raw
+        // capture left untouched on disk — instead of a note whose stated length and
+        // actual audio disagree.
+        let expected = CMTimeGetSeconds(composition.duration)
+        let actual = CMTimeGetSeconds(try await AVURLAsset(url: staging).load(.duration))
+        guard actual.isFinite, actual >= min(expected - 1, expected * 0.98) else {
+            throw RecorderError.exportFailed(
+                "The export produced \(TimeFormatting.clock(actual)) of audio but \(TimeFormatting.clock(expected)) was recorded. The raw capture has been kept."
+            )
+        }
+
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            _ = try FileManager.default.replaceItemAt(outputURL, withItemAt: staging)
+        } else {
+            try FileManager.default.moveItem(at: staging, to: outputURL)
+        }
+        return actual
     }
 }
 
 extension AudioRecorder: SCStreamDelegate, SCStreamOutput {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        DispatchQueue.main.async {
-            self.isRecording = false
-        }
+        handleUnexpectedStop(
+            message: "The system audio capture stopped unexpectedly (\(error.localizedDescription)). Everything recorded up to that point has been saved to this note."
+        )
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio,
               sampleBuffer.isValid,
               sampleBuffer.numSamples > 0,
+              let scratchURL = destination?.systemScratch,
               let description = sampleBuffer.formatDescription?.audioStreamBasicDescription else { return }
 
         if systemFile == nil {
@@ -282,7 +409,7 @@ extension AudioRecorder: SCStreamDelegate, SCStreamOutput {
                 standardFormatWithSampleRate: description.mSampleRate,
                 channels: AVAudioChannelCount(description.mChannelsPerFrame)
             ) else { return }
-            systemFile = try? AVAudioFile(forWriting: systemURL, settings: format.settings)
+            systemFile = try? AVAudioFile(forWriting: scratchURL, settings: format.settings)
         }
         guard let file = systemFile,
               let format = AVAudioFormat(
