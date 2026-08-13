@@ -16,7 +16,7 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 30) {
             DosaMark()
-                .frame(width: 62, height: 62)
+                .frame(width: 112, height: 112)
 
             VStack(spacing: 10) {
                 Text(greeting)
