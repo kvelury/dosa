@@ -34,5 +34,7 @@
 	<string>Dosa records your microphone during meetings so it can transcribe and summarize them.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Dosa captures system audio so it can transcribe what the other meeting participants say.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Dosa can transcribe your meeting recordings on this Mac instead of sending audio to a cloud provider.</string>
 </dict>
 </plist>

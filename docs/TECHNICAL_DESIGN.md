@@ -9,7 +9,7 @@
 
 ## 1. What Dosa does
 
-Dosa records meeting audio **directly from the Mac** (no bot joins the call), lets the user take sparse manual notes in a live markdown editor, then uses the **Gemini API** to (1) transcribe the recording with speaker identification and (2) synthesize polished meeting notes anchored on the user's manual notes. Generated notes render with a deterministic word-level diff: the user's words in the primary text color, Dosa's additions in a configurable grey/color. Notes can be organized in nested folders, pinned, searched globally, exported to disk, and exported to a **Notion database** that Dosa creates automatically via Notion's hosted MCP server.
+Dosa records meeting audio **directly from the Mac** (no bot joins the call), lets the user take sparse manual notes in a live markdown editor, then uses the **configured LLM provider** (Gemini or DeepSeek) to (1) transcribe the recording with speaker identification and (2) synthesize polished meeting notes anchored on the user's manual notes. (Transcription always runs on Gemini — DeepSeek has no audio input.) Generated notes render with a deterministic word-level diff: the user's words in the primary text color, Dosa's additions in a configurable grey/color. Notes can be organized in nested folders, pinned, searched globally, exported to disk, and exported to a **Notion database** that Dosa creates automatically via Notion's hosted MCP server.
 
 Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), it works with any source: Zoom, Meet, Teams, Slack huddles, browser tabs, video files.
 
@@ -108,7 +108,7 @@ Two simultaneous captures, both written to temp `.caf` files during recording, m
 
 - **Permissions**: mic via `AVCaptureDevice.requestAccess(.audio)`; system audio needs Screen & System Audio Recording (`CGPreflightScreenCaptureAccess` / `CGRequestScreenCaptureAccess`; grant requires app relaunch — the thrown error explains this).
 - **Threading**: all file writes on the serial `sampleQueue`; files are closed on that queue via a checked continuation before mixing (flush guarantee). Published props mutated on main.
-- **Mixdown**: `AVMutableComposition` with both tracks inserted at `.zero` → `AVAssetExportSession(presetName: AVAssetExportPresetAppleM4A)` → `.m4a`. `await session.export()` is deprecated on macOS 15 but functional. Small start-time skew between mic/system (~100s of ms) is accepted.
+- **Mixdown**: `AVMutableComposition` with both tracks inserted at `.zero` → `AVAssetExportSession(presetName: AVAssetExportPresetAppleM4A)` → `.m4a`. The same `mix` helper then runs once per source to keep `<id>-mic.m4a` / `<id>-system.m4a` beside it (see §5.1c) — roughly doubling recording storage, in exchange for on-device speaker attribution. `await session.export()` is deprecated on macOS 15 but functional. Small start-time skew between mic/system (~100s of ms) is accepted.
 - **Level metering** (drives the waveform): RMS is computed per buffer (every 8th sample) for both streams; `peakLevel` (sampleQueue-owned) keeps the max and decays ×0.5 each tick. A 0.09 s main-thread timer shifts `levelHistory: [Float]` (7 entries, scaled `min(1, rms*7)`), consumed by `RecordingWaveformView` (7 animated capsules).
 - Re-recording is only possible after **Discard Recording** (⋯ menu) — setting a new recording clears `transcript` (`setRecording`), and discarding clears recording+transcript but keeps `enhancedMarkdown`.
 
@@ -128,10 +128,30 @@ Two simultaneous captures, both written to temp `.caf` files during recording, m
 
 - `DetailedError` protocol (declared here): `errorDetail: String?` carries raw response bodies (truncated 4000 chars) for the error dialog's "technical details". `GeminiError` cases all carry payloads.
 
+### 5.1b DeepSeekClient (`DeepSeekClient.swift`)
+
+- REST, no SDK. OpenAI-compatible `POST https://api.deepseek.com/chat/completions` with `Authorization: Bearer` — single user message, `stream: false`, first choice's `message.content` returned.
+- **Text-only**: DeepSeek has no audio/files endpoint, so it can only serve the note-generation step; transcription stays on Gemini even when DeepSeek is the selected provider.
+- Models: `deepseek-v4-flash` (default — fast/cheap) and `deepseek-v4-pro` (`AppSettings.availableDeepSeekModels`; lineup per api-docs.deepseek.com as of Aug 2026). `AppSettings.resolveDeepSeekModel` remaps the retired `deepseek-chat`/`deepseek-reasoner` names and any unknown stored value to a current model. No fallback chain (nothing to fall back to).
+- `DeepSeekError` conforms to `DetailedError` like `GeminiError` (friendly summary + raw payload for the error dialog).
+
+### 5.1c AppleTranscriber (`AppleTranscriber.swift`) — on-device transcription
+
+- `AppSettings.TranscriptionEngine`: `.gemini` (default) / `.appleAdvanced` / `.appleBasic`, stored under `transcriptionEngine`; `resolvedTranscriptionEngine` degrades Advanced→Basic when unavailable.
+- **Advanced** = macOS 26 `SpeechAnalyzer`/`SpeechTranscriber` (long-form model, asset auto-download via `AssetInventory`). Compile-gated with `#if canImport(FoundationModels)` (a 26-SDK-only framework) so the project still builds on older SDKs — on a 15.x SDK the code is simply absent and `advancedAvailable == false`. **This path is unverified until built with a macOS 26 SDK.**
+- **Basic** = `SFSpeechRecognizer` file recognition: partials off, punctuation on, `requiresOnDeviceRecognition` when supported (server path caps at ~1 min). Needs `NSSpeechRecognitionUsageDescription` (in `Resources/Info.plist`) + per-user Speech Recognition permission.
+
+> **CALLOUT — Basic needs macOS Dictation switched on.** The on-device recognizer *is* the Dictation model, so with Dictation off the daemon fails every request with `kLSRErrorDomain` 201 "Siri and Dictation are disabled" — `recognizer.isAvailable` still reports true, so it can't be pre-flighted. `AppleTranscriber.mapped(_:)` translates that into a `.dictationDisabled` error pointing at System Settings → Keyboard → Dictation. Not a fallback candidate: retrying with `requiresOnDeviceRecognition = false` would ship audio to Apple's servers and cap at ~1 min, defeating the point of the on-device engine.
+- **Two-way speaker attribution without diarization**: `AudioRecorder.stop` now also exports each source on its own — `<id>-mic.m4a` / `<id>-system.m4a` next to the mixed `<id>.m4a` (best-effort; a failed side export never fails the recording). `AppleTranscriber.transcribe(micURL:systemURL:…)` transcribes both, labels mic lines with the user's name (or "You") and system lines "Others", and interleaves by timestamp into the app's usual `**Speaker** [mm:ss]: …` format. Remote participants can't be told apart — they share the system track.
+- **Echo suppression**: without headphones the mic also captures the other participants, so a mic line is dropped when a system line within ±3 s shares ≥50% of its words (`isEcho`, Jaccard-ish over lowercased word sets).
+- Recordings made before per-track capture have no side files: `NotesStore.trackURL(for:_:)` returns nil and transcription falls back to the mixed file as unlabeled `[mm:ss] …` lines (word segments grouped on >1.2 s pauses / ~25 s spans). `deletePermanently`/`discardRecording` clean up side tracks via `removeRecordingFiles`.
+- The transcript prompt (and `{{user_name}}`) applies only to the Gemini engine.
+
 ### 5.2 GenerationManager (`GenerationManager.swift`, @MainActor)
 
 Pipeline per note: **transcribe (if no cached transcript) → generate**.
 
+- **Provider routing**: `AppSettings.currentProvider` (UserDefaults `llmProvider`; anything outside `supportedProviders` — e.g. the "coming soon" Anthropic/OpenAI tabs — resolves to Gemini). Generation uses `DeepSeekClient` when DeepSeek is selected, else `GeminiClient`. Transcription uses `resolvedTranscriptionEngine`: `GeminiClient` for `.gemini` (requires a Gemini key — errors only when a transcription is actually needed), `AppleTranscriber` for the on-device engines (no key). Missing provider key errors up front.
 - Prompts come from UserDefaults with fallbacks to `AppSettings.defaultTranscriptPrompt` / `defaultNotesPrompt` (empty/whitespace stored value ⇒ default, via `AppSettings.string(forKey:default:)`).
 - Placeholder substitution: `{{title}}`, `{{date}}`, `{{user_name}}` (from Profile settings; fallback text asks the model to infer), `{{verbosity}}` (5-level instruction from the Notes Style slider, default level 2 "Balanced"), `{{manual_notes}}`, `{{transcript}}`.
 - The transcript prompt tells the model the recorder's name = mic voice (fixes wrong-name guessing). "Re-transcribe & Regenerate" (⋯ menu) clears the cached transcript first.
@@ -229,7 +249,7 @@ Flow (`authorize()`):
 4. Browser bounce with PKCE S256 + `state` + `resource=<mcp endpoint>` (RFC 8707).
 5. Token exchange (form-encoded, no secret); refresh via `refresh_token` grant, rotating tokens stored.
 
-Storage: **UserDefaults** (`notionAccessToken/RefreshToken/TokenExpiry/ClientId/TokenEndpoint/Workspace…`) — consistent with the Gemini key. *Keychain is the known hardening upgrade.* `validAccessToken()` auto-refreshes within 60 s of expiry.
+Storage: **UserDefaults** (`notionAccessToken/RefreshToken/TokenExpiry/ClientId/TokenEndpoint/Workspace…`) — consistent with the LLM provider API keys. *Keychain is the known hardening upgrade.* `validAccessToken()` auto-refreshes within 60 s of expiry.
 
 ### 10.2 NotionMCPClient — minimal MCP
 
@@ -264,9 +284,9 @@ Per-note sync toggle (data-source destinations only); push = debounced `replace_
 
 ## 11. Settings (`SettingsView.swift`)
 
-Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Notion** (§10) → **LLM Provider** (segmented Gemini/Anthropic/OpenAI; Gemini tab = API key + link + model picker; other tabs are "coming soon" stubs, selection is UI-only `@State`) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
+Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Notion** (§10) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini and DeepSeek tabs = API key + link + model picker, DeepSeek adds a transcription-still-uses-Gemini caption; Anthropic/OpenAI tabs are "coming soon" stubs that resolve to Gemini at generation time) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
 
-- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt). **API key & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models.
+- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models.
 - Closing Settings bumps `themeRefreshTick` (§8).
 
 > **CALLOUT — Form footer text on macOS 26 right-aligns wrapped lines** unless you add `.multilineTextAlignment(.leading)` (plus `.fixedSize(horizontal: false, vertical: true)` and a leading-aligned max-width frame). All footers here do this; keep the pattern for new ones. Similarly, a bare `Slider` in a grouped Form gets shoved into the trailing "value column" — give it a hidden empty label + `.frame(maxWidth: .infinity)`.
@@ -284,7 +304,7 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 
 ## 13. Error handling
 
-- `DetailedError { errorDetail: String? }` — conformed by `GeminiError` and `NotionMCPClient.ClientError`; friendly `errorDescription` + raw payload separated.
+- `DetailedError { errorDetail: String? }` — conformed by `GeminiError`, `DeepSeekError`, and `NotionMCPClient.ClientError`; friendly `errorDescription` + raw payload separated.
 - `ErrorDialogView` (sheet, not alert — alerts can't hold disclosure groups): warning icon, summary line, collapsed **"Show technical details"** (150 pt scrollable, selectable, monospaced raw body), OK. Presented from NoteEditorView via `errorPresented` binding that clears `localError(+Detail)` and `generator.errorMessage(+Detail)` on dismiss; Notion export errors are copied into the local pair. Notion *connection* errors render red in the Settings footer instead.
 - Generation cancellations are silent by design.
 

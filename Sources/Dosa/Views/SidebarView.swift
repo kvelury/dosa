@@ -13,6 +13,18 @@ struct SidebarView: View {
     @State private var confirmEmptyTrash = false
     @State private var pendingDeleteIds: Set<UUID> = []
 
+    @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
+    @AppStorage(AppSettings.modelKey) private var geminiModel = AppSettings.defaultModel
+    @AppStorage(AppSettings.deepseekModelKey) private var deepseekModel = AppSettings.defaultDeepSeekModel
+
+    /// The model the default provider will actually use, for the footer line.
+    private var activeModelName: String {
+        if AppSettings.supportedProviders.contains(llmProvider), llmProvider == "DeepSeek" {
+            return AppSettings.resolveDeepSeekModel(deepseekModel)
+        }
+        return AppSettings.resolveModel(geminiModel)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -61,8 +73,10 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
-                .help("Gemini API key, prompts, and app options")
-                Text("Dosa — Version \(Self.appVersion)")
+                .help("LLM provider API key, prompts, and app options")
+                (Text("Dosa v\(Self.appVersion)")
+                    + Text("  ·  ")
+                    + Text(activeModelName).italic())
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

@@ -6,6 +6,8 @@ import SwiftUI
 struct SetupBanner: View {
     @AppStorage(AppSettings.userNameKey) private var userName = ""
     @AppStorage(AppSettings.apiKeyKey) private var apiKey = ""
+    @AppStorage(AppSettings.deepseekAPIKeyKey) private var deepseekAPIKey = ""
+    @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
     let onOpenSettings: () -> Void
 
     private var missingName: Bool {
@@ -13,17 +15,19 @@ struct SetupBanner: View {
     }
 
     private var missingAPIKey: Bool {
-        apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let provider = AppSettings.supportedProviders.contains(llmProvider) ? llmProvider : "Gemini"
+        let providerKey = provider == "DeepSeek" ? deepseekAPIKey : apiKey
+        return providerKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var message: String? {
         switch (missingName, missingAPIKey) {
         case (true, true):
-            return "Finish setting up Dosa — add your name and a Gemini API key in Settings."
+            return "Finish setting up Dosa — add your name and an LLM provider API key in Settings."
         case (true, false):
             return "Add your name in Settings so Dosa can label your voice correctly."
         case (false, true):
-            return "Add a Gemini API key in Settings to enable transcription and note generation."
+            return "Add an LLM provider API key in Settings to enable transcription and note generation."
         case (false, false):
             return nil
         }

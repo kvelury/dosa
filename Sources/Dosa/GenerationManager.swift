@@ -30,16 +30,35 @@ final class GenerationManager: ObservableObject {
         guard phase == .idle else { return }
         guard let note = store.note(id: noteId) else { return }
 
-        let apiKey = (UserDefaults.standard.string(forKey: AppSettings.apiKeyKey) ?? "")
+        let provider = AppSettings.currentProvider
+        let geminiKey = (UserDefaults.standard.string(forKey: AppSettings.apiKeyKey) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !apiKey.isEmpty else {
-            errorMessage = "Add your Gemini API key first — open Settings with the gear icon at the top of the sidebar."
+        let deepseekKey = (UserDefaults.standard.string(forKey: AppSettings.deepseekAPIKeyKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let providerKey = provider == "DeepSeek" ? deepseekKey : geminiKey
+        guard !providerKey.isEmpty else {
+            errorMessage = "Add your \(provider) API key first — open Settings with the gear icon at the top of the sidebar."
             return
         }
-        let model = AppSettings.resolveModel(
+
+        let geminiModel = AppSettings.resolveModel(
             AppSettings.string(forKey: AppSettings.modelKey, default: AppSettings.defaultModel)
         )
-        let client = GeminiClient(apiKey: apiKey, model: model)
+        let transcriptionEngine = AppSettings.resolvedTranscriptionEngine
+        // For Gemini-engine transcription; DeepSeek has no audio input, so the
+        // only alternatives are the on-device Apple engines.
+        let geminiTranscriber = GeminiClient(apiKey: geminiKey, model: geminiModel)
+        let generateText: (String) async throws -> String
+        if provider == "DeepSeek" {
+            let deepseekModel = AppSettings.resolveDeepSeekModel(AppSettings.string(
+                forKey: AppSettings.deepseekModelKey, default: AppSettings.defaultDeepSeekModel
+            ))
+            let client = DeepSeekClient(apiKey: deepseekKey, model: deepseekModel)
+            generateText = { try await client.generateText(prompt: $0) }
+        } else {
+            generateText = { try await geminiTranscriber.generateText(prompt: $0) }
+        }
 
         activeNoteId = noteId
         defer {
@@ -60,10 +79,30 @@ final class GenerationManager: ObservableObject {
                     return
                 }
                 phase = .transcribing
-                let transcriptPrompt = AppSettings.string(
-                    forKey: AppSettings.transcriptPromptKey, default: AppSettings.defaultTranscriptPrompt
-                ).replacingOccurrences(of: "{{user_name}}", with: resolvedName)
-                let result = try await client.transcribe(audioURL: audioURL, prompt: transcriptPrompt)
+                let result: String
+                if transcriptionEngine == .gemini {
+                    guard !geminiKey.isEmpty else {
+                        errorMessage = "Transcription is set to Gemini (Cloud), which needs a Gemini API key. Add one under Settings → LLM Provider → Gemini, or switch to an on-device engine in Settings → Transcription."
+                        return
+                    }
+                    let transcriptPrompt = AppSettings.string(
+                        forKey: AppSettings.transcriptPromptKey, default: AppSettings.defaultTranscriptPrompt
+                    ).replacingOccurrences(of: "{{user_name}}", with: resolvedName)
+                    result = try await geminiTranscriber.transcribe(audioURL: audioURL, prompt: transcriptPrompt)
+                } else if let micURL = store.trackURL(for: note, .mic),
+                          let systemURL = store.trackURL(for: note, .system) {
+                    // Separate mic/system tracks were kept, so speech can be
+                    // attributed to the user vs. the other participants.
+                    result = try await AppleTranscriber.transcribe(
+                        micURL: micURL,
+                        systemURL: systemURL,
+                        engine: transcriptionEngine,
+                        userName: userName.isEmpty ? "You" : userName
+                    )
+                } else {
+                    // Older recording with only the mixed file: timestamps, no labels.
+                    result = try await AppleTranscriber.transcribe(audioURL: audioURL, engine: transcriptionEngine)
+                }
                 transcript = Self.stripCodeFence(result)
                 if var fresh = store.note(id: noteId) {
                     fresh.transcript = transcript
@@ -84,7 +123,7 @@ final class GenerationManager: ObservableObject {
                 .replacingOccurrences(of: "{{manual_notes}}", with: latest.manualText.isEmpty ? "(none)" : latest.manualText)
                 .replacingOccurrences(of: "{{transcript}}", with: transcript ?? "")
 
-            var markdown = Self.stripCodeFence(try await client.generateText(prompt: prompt))
+            var markdown = Self.stripCodeFence(try await generateText(prompt))
             markdown = Self.stripLeadingTitleAndDate(markdown, title: latest.displayTitle)
             markdown = Self.normalizeBullets(markdown)
             if var fresh = store.note(id: noteId) {
