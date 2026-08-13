@@ -152,7 +152,7 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("Settings", systemImage: "gearshape")
+                Label("Dosa Settings", systemImage: "gearshape")
                     .font(.headline)
                 Spacer()
                 Button("Done") {

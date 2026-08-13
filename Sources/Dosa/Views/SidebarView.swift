@@ -74,7 +74,7 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
                 .help("LLM provider API key, prompts, and app options")
-                (Text("Dosa v\(Self.appVersion)")
+                (Text("v\(Self.appVersion)")
                     + Text("  ·  ")
                     + Text(activeModelName).italic())
                     .font(.caption2)
