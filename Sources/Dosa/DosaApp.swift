@@ -12,6 +12,9 @@ final class AppState: ObservableObject {
     @Published var showGlobalSearch = false
     /// Bumped to a fresh UUID each time Cmd+F fires; the open note editor consumes it.
     @Published var noteSearchRequest: UUID?
+    /// Set when recording should start as soon as this note's editor appears — the
+    /// editor is rebuilt on selection change, so the request has to outlive it.
+    @Published var pendingRecordNoteId: UUID?
     /// Bumped when Settings closes; ContentView uses it to rebuild the view tree
     /// so theme changes apply everywhere at once.
     @Published var themeRefreshTick = 0

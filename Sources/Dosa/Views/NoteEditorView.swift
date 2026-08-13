@@ -22,6 +22,7 @@ struct NoteEditorView: View {
     @State private var showTranscript = false
     @State private var confirmDelete = false
     @State private var confirmDiscardRecording = false
+    @State private var confirmReplaceRecording = false
     @State private var localError: String?
     @State private var localErrorDetail: String?
     @State private var toast: String?
@@ -56,6 +57,10 @@ struct NoteEditorView: View {
                 viewMode = .aiNotes
             }
             handleReveal(search.pendingReveal)
+            if appState.pendingRecordNoteId == noteId {
+                appState.pendingRecordNoteId = nil
+                beginRecording()
+            }
         }
         .onChange(of: search.pendingReveal) { _, newValue in
             handleReveal(newValue)
@@ -87,6 +92,16 @@ struct NoteEditorView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The note, its transcript, and its recording move to Deleted Notes, and are permanently removed after \(NotesStore.trashRetentionDays) days.")
+        }
+        .confirmationDialog(
+            "This note already has \(existingWorkDescription(current) ?? "content")",
+            isPresented: $confirmReplaceRecording
+        ) {
+            Button("Record in a New Note") { recordInNewNote() }
+            Button("Replace It", role: .destructive) { beginRecording() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\(replaceWarning(current)) Recording in a new note keeps this one exactly as it is.")
         }
         .confirmationDialog("Discard this recording?", isPresented: $confirmDiscardRecording) {
             Button("Discard Recording", role: .destructive) {
@@ -494,28 +509,66 @@ struct NoteEditorView: View {
         )
     }
 
+    /// What recording would destroy if it ran on this note, phrased for the prompt.
+    /// Nil when the note is empty and recording is safe to start immediately.
+    private func existingWorkDescription(_ note: Note) -> String? {
+        let hasRecording = note.recordingFileName != nil
+        let hasNotes = note.transcript != nil || note.enhancedMarkdown != nil
+        switch (hasRecording, hasNotes) {
+        case (true, true): return "a recording and generated notes"
+        case (true, false): return "a recording"
+        case (false, true): return "generated notes"
+        case (false, false): return nil
+        }
+    }
+
+    private func replaceWarning(_ note: Note) -> String {
+        note.recordingFileName != nil
+            ? "Recording again here overwrites the audio and clears the transcript."
+            : "Recording again here clears the transcript this note's generated notes came from."
+    }
+
     private func startRecording() {
+        guard let current = store.note(id: noteId) else { return }
+        // Recording writes over this note's audio and clears its transcript, so never
+        // start on top of existing work without asking first.
+        if existingWorkDescription(current) != nil {
+            confirmReplaceRecording = true
+            return
+        }
+        beginRecording()
+    }
+
+    private func beginRecording() {
         player.stop()
         Task {
             do {
-                try await recorder.start(noteId: noteId)
+                try await recorder.start(destination: store.recordingDestination(for: noteId))
             } catch {
                 localError = error.localizedDescription
             }
         }
     }
 
+    /// Leaves this note exactly as it is and records into a fresh note in the same
+    /// folder. The new editor picks the request up in `onAppear`.
+    private func recordInNewNote() {
+        player.stop()
+        let folderId = store.note(id: noteId)?.folderId
+        let note = store.createNote(in: folderId)
+        appState.pendingRecordNoteId = note.id
+        selectedNoteId = note.id
+    }
+
     private func stopRecording() {
         Task {
             do {
-                let fileName = "\(noteId.uuidString).m4a"
-                let url = store.recordingsDirectory.appendingPathComponent(fileName)
-                let duration = try await recorder.stop(
-                    outputURL: url,
-                    micTrackURL: store.trackURL(forRecordingNamed: fileName, .mic),
-                    systemTrackURL: store.trackURL(forRecordingNamed: fileName, .system)
+                let recording = try await recorder.stop()
+                store.setRecording(
+                    noteId: recording.noteId,
+                    fileName: recording.fileName,
+                    duration: recording.duration
                 )
-                store.setRecording(noteId: noteId, fileName: fileName, duration: duration)
             } catch {
                 localError = error.localizedDescription
             }
