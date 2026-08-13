@@ -25,6 +25,7 @@ Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), 
    - `Resources/dosa-mark-{light,dark}.png`: rasterizes `Resources/Branding/dosa-mark-currentcolor.svg` (a template shape — solid black, transparent elsewhere) once, then tints it twice via `NSColor.set()` + `NSRect.fill(using: .sourceIn)` (the same alpha-preserving technique AppKit uses internally for `.isTemplate` images) — brown `#7A4512` for light appearance, amber `#E0A44E` for dark. Same brand pairing `dosa-mark-adaptive.svg` encodes via CSS, reproduced natively because that file's `@media (prefers-color-scheme:)` rules render inconsistently through `NSImage`/ImageIO (confirmed: mixed light/dark rule results within one raster) — not safe for native rendering.
 3. Assembles `build/Dosa.app/Contents/{MacOS/Dosa, Info.plist, Resources/{AppIcon.icns, dosa-mark-light.png, dosa-mark-dark.png}}`
 4. **Ad-hoc codesigns** (`codesign --force --sign -`)
+5. **Optionally installs** — only with `./build.sh --install`, which quits a running Dosa (replacing a live bundle leaves it half-broken), removes `/Applications/Dosa.app` rather than copying over it (so files dropped in a later version can't linger), and copies the fresh build in. Deliberately opt-in: the dev loop reruns this script constantly, and rewriting the installed bundle every time makes it ambiguous which copy is running and re-triggers the TCC prompts tied to that bundle.
 
 **Dev loop**: `swift build` to typecheck; `./build.sh && open build/Dosa.app` to ship. Kill the running app first (`pkill -x Dosa`).
 
