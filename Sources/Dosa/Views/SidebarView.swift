@@ -60,7 +60,7 @@ struct SidebarView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 12) {
                 Button {
                     showSettings = true
                 } label: {
@@ -74,18 +74,15 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
                 .help("LLM provider API key, prompts, and app options")
-                HStack(spacing: 5) {
-                    DosaMark()
-                        .frame(width: 11, height: 11)
-                    (Text("Dosa v\(Self.appVersion)")
-                        + Text("  ·  ")
-                        + Text(activeModelName).italic())
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                (Text("v\(Self.appVersion)")
+                    + Text("  ·  ")
+                    + Text(activeModelName).italic())
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.top, 20)
+            .padding(.bottom, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .alert("New Folder", isPresented: $showNewFolderAlert) {
