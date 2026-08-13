@@ -37,11 +37,11 @@ struct ContentView: View {
                     WelcomeView()
                 }
             }
+            .id(appState.themeRefreshTick)
             .safeAreaInset(edge: .top, spacing: 0) {
                 SetupBanner(onOpenSettings: { showSettings = true })
             }
         }
-        .id(appState.themeRefreshTick)
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }

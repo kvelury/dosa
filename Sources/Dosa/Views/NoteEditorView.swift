@@ -454,14 +454,14 @@ struct NoteEditorView: View {
             }
         } label: {
             Image(systemName: "ellipsis.circle")
-                .font(.system(size: 24, weight: .medium))
+                .font(.system(size: 27, weight: .medium))
                 .foregroundStyle(.primary)
         }
         .menuStyle(.borderlessButton)
         .controlSize(.large)
         .fixedSize()
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 9)
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(.quaternary))
         .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
