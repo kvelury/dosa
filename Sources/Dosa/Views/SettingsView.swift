@@ -215,7 +215,9 @@ struct SettingsView: View {
                     }
                     if transcriptionEngine == AppSettings.TranscriptionEngine.appleAdvanced.rawValue,
                        !AppleTranscriber.advancedAvailable {
-                        Label("On-Device (Advanced) needs macOS 26 or later — this Mac will use On-Device (Basic) instead.",
+                        Label(AppleTranscriber.runningMacOS26
+                              ? "On-Device (Advanced) isn't in this build. This Mac is on macOS 26, but Dosa was compiled without the macOS 26 SDK — install Xcode 26 and rebuild. Until then this Mac will use On-Device (Basic)."
+                              : "On-Device (Advanced) needs macOS 26 or later — this Mac will use On-Device (Basic) instead.",
                               systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
                             .foregroundStyle(.orange)
@@ -250,13 +252,16 @@ struct SettingsView: View {
                         }
                     }
 
-                    Picker("Provider", selection: $selectedTab) {
+                    Picker(selection: $selectedTab) {
                         ForEach(Self.providers, id: \.self) { provider in
                             Text(provider)
                         }
+                    } label: {
+                        EmptyView()
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+                    .frame(maxWidth: .infinity)
 
                     if selectedTab == "Gemini" {
                         SecureField("API Key", text: $apiKey)
