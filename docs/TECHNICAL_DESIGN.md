@@ -358,7 +358,7 @@ Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) �
 - **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models.
 - Closing Settings bumps `themeRefreshTick` (§8).
 
-> **CALLOUT — Form footer text on macOS 26 right-aligns wrapped lines** unless you add `.multilineTextAlignment(.leading)` (plus `.fixedSize(horizontal: false, vertical: true)` and a leading-aligned max-width frame). All footers here do this; keep the pattern for new ones. Similarly, a bare `Slider` in a grouped Form gets shoved into the trailing "value column" — give it a hidden empty label + `.frame(maxWidth: .infinity)`.
+> **CALLOUT — Form footer text on macOS 26 right-aligns wrapped lines** unless you add `.multilineTextAlignment(.leading)` (plus `.fixedSize(horizontal: false, vertical: true)` and a leading-aligned max-width frame). All footers here do this; keep the pattern for new ones. Similarly, a bare `Slider` or segmented `Picker` in a grouped Form gets shoved into the trailing "value column" (provider tabs hug the leading edge) — give it a hidden empty label + `.frame(maxWidth: .infinity)`.
 
 ---
 
