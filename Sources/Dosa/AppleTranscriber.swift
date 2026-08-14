@@ -69,10 +69,25 @@ enum AppleTranscriber {
         return false
     }
 
+    /// The Mac itself is on macOS 26+, even if this binary was compiled
+    /// against an older SDK that doesn't include SpeechAnalyzer.
+    static var runningMacOS26: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26
+    }
+
+    /// 0...1 as Basic chunking works through a long recording. Not called
+    /// when the file fits in a single dictation window.
+    typealias ProgressHandler = @Sendable (Double) async -> Void
+
     /// Transcribes the mixed recording. No speaker labels — every line is
     /// just `[mm:ss] text`.
-    static func transcribe(audioURL: URL, engine: AppSettings.TranscriptionEngine) async throws -> String {
-        let lines = try await transcribeLines(audioURL: audioURL, engine: engine)
+    static func transcribe(
+        audioURL: URL,
+        engine: AppSettings.TranscriptionEngine,
+        progress: ProgressHandler? = nil
+    ) async throws -> String {
+        let reporter = await chunkReporter(for: [audioURL], engine: engine, progress: progress)
+        let lines = try await transcribeLines(audioURL: audioURL, engine: engine, reporter: reporter)
         guard !lines.isEmpty else { throw TranscriberError.recognitionFailed("The recognizer returned an empty transcript.") }
         return lines.map { "[\(mmss($0.start))] \($0.text)" }.joined(separator: "\n")
     }
@@ -84,10 +99,12 @@ enum AppleTranscriber {
         micURL: URL,
         systemURL: URL,
         engine: AppSettings.TranscriptionEngine,
-        userName: String
+        userName: String,
+        progress: ProgressHandler? = nil
     ) async throws -> String {
-        let micLines = try await transcribeLines(audioURL: micURL, engine: engine)
-        let systemLines = try await transcribeLines(audioURL: systemURL, engine: engine)
+        let reporter = await chunkReporter(for: [micURL, systemURL], engine: engine, progress: progress)
+        let micLines = try await transcribeLines(audioURL: micURL, engine: engine, reporter: reporter)
+        let systemLines = try await transcribeLines(audioURL: systemURL, engine: engine, reporter: reporter)
         guard !micLines.isEmpty || !systemLines.isEmpty else {
             throw TranscriberError.recognitionFailed("The recognizer returned an empty transcript for both audio tracks.")
         }
@@ -109,14 +126,67 @@ enum AppleTranscriber {
 
     private static func transcribeLines(
         audioURL: URL,
-        engine: AppSettings.TranscriptionEngine
+        engine: AppSettings.TranscriptionEngine,
+        reporter: ChunkReporter? = nil
     ) async throws -> [Line] {
         #if canImport(FoundationModels)
         if engine == .appleAdvanced, #available(macOS 26.0, *) {
             return try await advancedLines(audioURL: audioURL)
         }
         #endif
-        return try await basicLines(audioURL: audioURL)
+        return try await basicLines(audioURL: audioURL, reporter: reporter)
+    }
+
+    /// Counts overlapping 50 s windows the same way `basicLines` walks them,
+    /// so the bar's denominator matches the work that will actually run.
+    private static func chunkCount(for duration: TimeInterval) -> Int {
+        guard duration.isFinite, duration > chunkDuration else { return 1 }
+        var count = 0
+        var chunkStart: TimeInterval = 0
+        while chunkStart < duration {
+            count += 1
+            let chunkEnd = min(chunkStart + chunkDuration, duration)
+            if chunkEnd >= duration { break }
+            chunkStart = chunkEnd - chunkOverlap
+        }
+        return count
+    }
+
+    private static func chunkReporter(
+        for urls: [URL],
+        engine: AppSettings.TranscriptionEngine,
+        progress: ProgressHandler?
+    ) async -> ChunkReporter? {
+        guard let progress, engine != .appleAdvanced else { return nil }
+        var total = 0
+        for url in urls {
+            let duration = CMTimeGetSeconds((try? await AVURLAsset(url: url).load(.duration)) ?? .zero)
+            total += chunkCount(for: duration)
+        }
+        guard total > 1 else { return nil }
+        let reporter = ChunkReporter(total: total, report: progress)
+        await reporter.started()
+        return reporter
+    }
+
+    private final class ChunkReporter: @unchecked Sendable {
+        private let total: Int
+        private let report: ProgressHandler
+        private var completed = 0
+
+        init(total: Int, report: @escaping ProgressHandler) {
+            self.total = total
+            self.report = report
+        }
+
+        func started() async {
+            await report(0)
+        }
+
+        func advance() async {
+            completed += 1
+            await report(min(1, Double(completed) / Double(total)))
+        }
     }
 
     // MARK: - Basic (SFSpeechRecognizer)
@@ -131,40 +201,30 @@ enum AppleTranscriber {
     /// this many seconds earlier.
     private static let chunkOverlap: TimeInterval = 8
 
-    private static func basicLines(audioURL: URL) async throws -> [Line] {
+    private static func basicLines(audioURL: URL, reporter: ChunkReporter?) async throws -> [Line] {
         try await requestAuthorization()
-
-        guard let recognizer = SFSpeechRecognizer(locale: Locale.current) ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
-              recognizer.isAvailable else {
-            throw TranscriberError.unavailable("SFSpeechRecognizer reported unavailable for the current locale.")
-        }
 
         let duration = CMTimeGetSeconds(try await AVURLAsset(url: audioURL).load(.duration))
         guard duration.isFinite, duration > 0 else {
             throw TranscriberError.recognitionFailed("Could not read the audio file's duration.")
         }
         guard duration > chunkDuration else {
-            return try await recognizeFile(audioURL, with: recognizer)
+            let lines = try await recognizeFile(audioURL)
+            await reporter?.advance()
+            return lines
         }
 
         var lines: [Line] = []
-        // The start time (in the full recording) of the latest line kept so far.
-        // Any line a later, overlapping chunk reports before this point is a
-        // re-transcription of audio already covered, and gets dropped.
-        var floor: TimeInterval = 0
         var chunkStart: TimeInterval = 0
         while chunkStart < duration {
+            try Task.checkCancellation()
             let chunkEnd = min(chunkStart + chunkDuration, duration)
             let chunkURL = try await exportChunk(from: audioURL, start: chunkStart, end: chunkEnd)
             defer { try? FileManager.default.removeItem(at: chunkURL) }
 
-            let chunkLines = try await recognizeFile(chunkURL, with: recognizer)
-            for line in chunkLines {
-                let start = chunkStart + line.start
-                guard start >= floor - 0.05 else { continue }
-                lines.append((text: line.text, start: start))
-                floor = max(floor, start)
-            }
+            let chunkLines = try await recognizeFile(chunkURL)
+            lines.append(contentsOf: stitch(chunkLines, onto: chunkStart, droppingOverlap: chunkStart > 0))
+            await reporter?.advance()
 
             if chunkEnd >= duration { break }
             chunkStart = chunkEnd - chunkOverlap
@@ -172,31 +232,82 @@ enum AppleTranscriber {
         return lines
     }
 
+    /// Maps a chunk's lines onto the full recording. When timestamps look
+    /// usable, the overlapping head of later chunks is dropped so the same
+    /// words aren't transcribed twice. On-device dictation often reports every
+    /// segment at t=0 (or a single untimed blob); in that case the previous
+    /// "floor" stitch dropped the entire later chunk and long recordings
+    /// collapsed back to the first ~50 s.
+    private static func stitch(_ chunkLines: [Line], onto chunkStart: TimeInterval, droppingOverlap: Bool) -> [Line] {
+        let placed = chunkLines.map { (text: $0.text, start: chunkStart + $0.start) }
+        guard droppingOverlap else { return placed }
+        let maxRelative = chunkLines.map(\.start).max() ?? 0
+        guard maxRelative >= chunkOverlap else { return placed }
+        return chunkLines.compactMap { line in
+            guard line.start >= chunkOverlap - 0.5 else { return nil }
+            return (text: line.text, start: chunkStart + line.start)
+        }
+    }
+
     /// Exports the `[start, end)` slice of `url` to a standalone temporary
     /// audio file so it can be handed to its own recognition request.
+    /// Uses the same composition+insertTimeRange path as `AudioRecorder.mix`,
+    /// then checks the exported duration so a silent full-file re-export
+    /// can't masquerade as a 50 s chunk.
     private static func exportChunk(from url: URL, start: TimeInterval, end: TimeInterval) async throws -> URL {
-        let asset = AVURLAsset(url: url)
-        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+        let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        guard let sourceTrack = try await asset.loadTracks(withMediaType: .audio).first else {
+            throw TranscriberError.recognitionFailed("The audio file has no audio track to chunk.")
+        }
+        let composition = AVMutableComposition()
+        guard let track = composition.addMutableTrack(
+            withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw TranscriberError.recognitionFailed("Could not create a chunk composition.")
+        }
+        let range = CMTimeRange(
+            start: CMTime(seconds: start, preferredTimescale: 60_000),
+            duration: CMTime(seconds: max(0, end - start), preferredTimescale: 60_000)
+        )
+        try track.insertTimeRange(range, of: sourceTrack, at: .zero)
+
+        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
             throw TranscriberError.recognitionFailed("Could not create a chunk export session.")
         }
         let chunkURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(".dosa-transcribe-chunk-\(UUID().uuidString).m4a")
         session.outputURL = chunkURL
         session.outputFileType = .m4a
-        session.timeRange = CMTimeRange(
-            start: CMTime(seconds: start, preferredTimescale: 600),
-            end: CMTime(seconds: end, preferredTimescale: 600)
-        )
         await session.export()
         guard session.status == .completed else {
             throw TranscriberError.recognitionFailed(session.error?.localizedDescription ?? "Chunk export did not complete.")
+        }
+        let actual = CMTimeGetSeconds(try await AVURLAsset(url: chunkURL).load(.duration))
+        let expected = end - start
+        guard actual.isFinite, actual > 0, actual <= expected + 2 else {
+            throw TranscriberError.recognitionFailed(
+                "Chunk export produced \(String(format: "%.1f", actual))s of audio but \(String(format: "%.1f", expected))s was requested."
+            )
         }
         return chunkURL
     }
 
     /// Runs one `SFSpeechURLRecognitionRequest` to completion and returns its
     /// lines with timestamps relative to the start of `audioURL` itself.
-    private static func recognizeFile(_ audioURL: URL, with recognizer: SFSpeechRecognizer) async throws -> [Line] {
+    /// A new recognizer is created per file: reusing one across sequential
+    /// chunk requests often makes later sessions finish immediately empty.
+    private static func recognizeFile(_ audioURL: URL) async throws -> [Line] {
+        guard let recognizer = SFSpeechRecognizer(locale: Locale.current)
+            ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US")) else {
+            throw TranscriberError.unavailable("SFSpeechRecognizer reported unavailable for the current locale.")
+        }
+        for _ in 0..<50 where !recognizer.isAvailable {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard recognizer.isAvailable else {
+            throw TranscriberError.unavailable("SFSpeechRecognizer reported unavailable for the current locale.")
+        }
+
         let request = SFSpeechURLRecognitionRequest(url: audioURL)
         request.shouldReportPartialResults = false
         request.addsPunctuation = true
@@ -205,24 +316,35 @@ enum AppleTranscriber {
             request.requiresOnDeviceRecognition = true
         }
 
-        let transcription: SFTranscription = try await withCheckedThrowingContinuation { continuation in
+        final class TaskBox: @unchecked Sendable {
+            var task: SFSpeechRecognitionTask?
+        }
+        let box = TaskBox()
+        // nil transcription = the file (or chunk) had no speech. Trailing
+        // silence at the end of a long recording is common; treating it as
+        // empty lets earlier chunks keep their text instead of failing the run.
+        let transcription: SFTranscription? = try await withCheckedThrowingContinuation { continuation in
             var finished = false
             var latest: SFTranscription?
-            recognizer.recognitionTask(with: request) { result, error in
+            box.task = recognizer.recognitionTask(with: request) { result, error in
                 guard !finished else { return }
                 if let result {
                     latest = result.bestTranscription
                     if result.isFinal {
                         finished = true
+                        box.task = nil
                         continuation.resume(returning: result.bestTranscription)
                         return
                     }
                 }
                 if let error {
                     finished = true
+                    box.task = nil
                     // Some errors still arrive after usable output (e.g. trailing silence).
                     if let latest, !latest.formattedString.isEmpty {
                         continuation.resume(returning: latest)
+                    } else if isNoSpeech(error) {
+                        continuation.resume(returning: nil)
                     } else {
                         continuation.resume(throwing: mapped(error))
                     }
@@ -230,12 +352,21 @@ enum AppleTranscriber {
             }
         }
 
+        guard let transcription else { return [] }
         let segments = transcription.segments.map { (text: $0.substring, start: $0.timestamp) }
         guard !segments.isEmpty else {
             let whole = transcription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
             return whole.isEmpty ? [] : [(text: whole, start: 0)]
         }
         return groupIntoLines(segments)
+    }
+
+    /// On-device dictation uses this when a window is silence or near-silence
+    /// (typical of the last chunk of a recording that trails off).
+    private static func isNoSpeech(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 1110 { return true }
+        return nsError.localizedDescription.localizedCaseInsensitiveContains("no speech detected")
     }
 
     /// The speech daemon reports "Siri and Dictation are disabled"

@@ -13,6 +13,9 @@ final class GenerationManager: ObservableObject {
 
     @Published var phase: Phase = .idle
     @Published var activeNoteId: UUID?
+    /// 0...1 while On-Device (Basic) is walking overlapping chunks; nil
+    /// otherwise (Gemini, Advanced, a file that fits in one window, or idle).
+    @Published var transcriptionProgress: Double?
     @Published var errorMessage: String?
     @Published var errorDetail: String?
 
@@ -24,6 +27,10 @@ final class GenerationManager: ObservableObject {
 
     func cancel() {
         currentTask?.cancel()
+    }
+
+    private func setTranscriptionProgress(_ fraction: Double) {
+        transcriptionProgress = fraction
     }
 
     func run(noteId: UUID, store: NotesStore) async {
@@ -65,6 +72,7 @@ final class GenerationManager: ObservableObject {
         defer {
             phase = .idle
             activeNoteId = nil
+            transcriptionProgress = nil
         }
 
         let userName = (UserDefaults.standard.string(forKey: AppSettings.userNameKey) ?? "")
@@ -80,6 +88,9 @@ final class GenerationManager: ObservableObject {
                     return
                 }
                 phase = .transcribing
+                let reportProgress: AppleTranscriber.ProgressHandler = { [weak self] fraction in
+                    await self?.setTranscriptionProgress(fraction)
+                }
                 let result: String
                 if transcriptionEngine == .gemini {
                     guard !geminiKey.isEmpty else {
@@ -98,11 +109,16 @@ final class GenerationManager: ObservableObject {
                         micURL: micURL,
                         systemURL: systemURL,
                         engine: transcriptionEngine,
-                        userName: userName.isEmpty ? "You" : userName
+                        userName: userName.isEmpty ? "You" : userName,
+                        progress: reportProgress
                     )
                 } else {
                     // Older recording with only the mixed file: timestamps, no labels.
-                    result = try await AppleTranscriber.transcribe(audioURL: audioURL, engine: transcriptionEngine)
+                    result = try await AppleTranscriber.transcribe(
+                        audioURL: audioURL,
+                        engine: transcriptionEngine,
+                        progress: reportProgress
+                    )
                 }
                 transcript = Self.stripCodeFence(result)
                 if var fresh = store.note(id: noteId) {
@@ -111,6 +127,7 @@ final class GenerationManager: ObservableObject {
                 }
             }
 
+            transcriptionProgress = nil
             phase = .generating
             let latest = store.note(id: noteId) ?? note
             let template = AppSettings.string(

@@ -254,10 +254,31 @@ struct NoteEditorView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(alignment: .top) { chunkingProgressStrip }
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(.quaternary))
         .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
         .padding(.bottom, 14)
         .animation(.easeInOut(duration: 0.18), value: player.playingNoteId == noteId)
+        .animation(.easeInOut(duration: 0.2), value: generator.transcriptionProgress)
+    }
+
+    /// Hairline fill along the top inner edge of the pill, in the active theme accent.
+    @ViewBuilder
+    private var chunkingProgressStrip: some View {
+        if let progress = generator.transcriptionProgress, generator.activeNoteId == noteId {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Theme.current.accentColor.opacity(0.18))
+                    Rectangle()
+                        .fill(Theme.current.accentColor)
+                        .frame(width: max(8, geo.size.width * min(max(progress, 0), 1)))
+                }
+            }
+            .frame(height: 3)
+            .padding(.horizontal, 26)
+            .allowsHitTesting(false)
+        }
     }
 
     private var scrubBar: some View {
