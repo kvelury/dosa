@@ -148,7 +148,7 @@ struct SidebarView: View {
     }
 
     private static let appVersion =
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.3"
 
     private var notesList: some View {
         List(selection: $selectedNoteIds) {

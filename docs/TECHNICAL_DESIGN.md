@@ -2,7 +2,7 @@
 
 **App**: Dosa, a native macOS meeting-notes app
 **Source**: `~/Desktop/DosaApp`
-**Version**: 1.0 · macOS 14+ · Swift 5.9 language mode (built with Swift 6.1 toolchain)
+**Version**: 1.3 · macOS 14+ · Swift 5.9 language mode (built with Swift 6.1 toolchain)
 **Audience**: This doc is the canonical reference for continuing development (human or Claude). It captures architecture, implementation details, design decisions, and gotchas discovered during development.
 
 ---
