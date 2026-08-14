@@ -11,7 +11,9 @@ import AVFoundation
 ///   so this file still builds with older toolchains.
 /// - **Basic** — `SFSpeechRecognizer`, available on the app's whole deployment
 ///   range. Dictation-grade; forced on-device when supported so long files
-///   aren't subject to the ~1-minute server limit.
+///   aren't subject to the ~1-minute server limit. Dictation sessions still
+///   stop themselves after roughly a minute regardless, so `basicLines` feeds
+///   the recognizer overlapping chunks rather than the whole file at once.
 ///
 /// Neither tier does speaker diarization. Dosa gets two-way attribution a
 /// different way: `AudioRecorder` keeps the microphone and system-audio
@@ -119,6 +121,16 @@ enum AppleTranscriber {
 
     // MARK: - Basic (SFSpeechRecognizer)
 
+    /// A dictation session reliably transcribes only its first ~50 s before
+    /// `isFinal` fires, so a long recording has to be fed in as several
+    /// overlapping windows rather than one request.
+    private static let chunkDuration: TimeInterval = 50
+    /// Overlap between consecutive windows. If a chunk's session ends a few
+    /// seconds early (dictation can fire `isFinal` before the full window is
+    /// read), the next chunk still covers that lost tail because it starts
+    /// this many seconds earlier.
+    private static let chunkOverlap: TimeInterval = 8
+
     private static func basicLines(audioURL: URL) async throws -> [Line] {
         try await requestAuthorization()
 
@@ -127,6 +139,64 @@ enum AppleTranscriber {
             throw TranscriberError.unavailable("SFSpeechRecognizer reported unavailable for the current locale.")
         }
 
+        let duration = CMTimeGetSeconds(try await AVURLAsset(url: audioURL).load(.duration))
+        guard duration.isFinite, duration > 0 else {
+            throw TranscriberError.recognitionFailed("Could not read the audio file's duration.")
+        }
+        guard duration > chunkDuration else {
+            return try await recognizeFile(audioURL, with: recognizer)
+        }
+
+        var lines: [Line] = []
+        // The start time (in the full recording) of the latest line kept so far.
+        // Any line a later, overlapping chunk reports before this point is a
+        // re-transcription of audio already covered, and gets dropped.
+        var floor: TimeInterval = 0
+        var chunkStart: TimeInterval = 0
+        while chunkStart < duration {
+            let chunkEnd = min(chunkStart + chunkDuration, duration)
+            let chunkURL = try await exportChunk(from: audioURL, start: chunkStart, end: chunkEnd)
+            defer { try? FileManager.default.removeItem(at: chunkURL) }
+
+            let chunkLines = try await recognizeFile(chunkURL, with: recognizer)
+            for line in chunkLines {
+                let start = chunkStart + line.start
+                guard start >= floor - 0.05 else { continue }
+                lines.append((text: line.text, start: start))
+                floor = max(floor, start)
+            }
+
+            if chunkEnd >= duration { break }
+            chunkStart = chunkEnd - chunkOverlap
+        }
+        return lines
+    }
+
+    /// Exports the `[start, end)` slice of `url` to a standalone temporary
+    /// audio file so it can be handed to its own recognition request.
+    private static func exportChunk(from url: URL, start: TimeInterval, end: TimeInterval) async throws -> URL {
+        let asset = AVURLAsset(url: url)
+        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw TranscriberError.recognitionFailed("Could not create a chunk export session.")
+        }
+        let chunkURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(".dosa-transcribe-chunk-\(UUID().uuidString).m4a")
+        session.outputURL = chunkURL
+        session.outputFileType = .m4a
+        session.timeRange = CMTimeRange(
+            start: CMTime(seconds: start, preferredTimescale: 600),
+            end: CMTime(seconds: end, preferredTimescale: 600)
+        )
+        await session.export()
+        guard session.status == .completed else {
+            throw TranscriberError.recognitionFailed(session.error?.localizedDescription ?? "Chunk export did not complete.")
+        }
+        return chunkURL
+    }
+
+    /// Runs one `SFSpeechURLRecognitionRequest` to completion and returns its
+    /// lines with timestamps relative to the start of `audioURL` itself.
+    private static func recognizeFile(_ audioURL: URL, with recognizer: SFSpeechRecognizer) async throws -> [Line] {
         let request = SFSpeechURLRecognitionRequest(url: audioURL)
         request.shouldReportPartialResults = false
         request.addsPunctuation = true
