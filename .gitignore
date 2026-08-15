@@ -4,3 +4,12 @@
 # SwiftPM's build directory. Note that build/ is *not* ignored — the assembled
 # build/Dosa.app bundle is tracked on purpose (see docs/TECHNICAL_DESIGN.md).
 /.build/
+
+# Agent-to-agent handoff notes. Local scratch for whoever picks the work up next;
+# it describes uncommitted state, so it is never useful in a commit. Written only
+# on request — see .claude/skills/handoff/SKILL.md.
+/handoff.md
+
+# Per-machine Claude Code permissions. The skills alongside it are meant to be
+# shared; this one is not.
+/.claude/settings.local.json
