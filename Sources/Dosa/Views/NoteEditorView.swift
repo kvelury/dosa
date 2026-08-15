@@ -86,10 +86,8 @@ struct NoteEditorView: View {
         .overlay(alignment: .bottom) {
             floatingBar(current: current)
         }
-        .overlay(alignment: .topTrailing) {
+        .trailingToolbarItem {
             actionsMenu(current: current)
-                .padding(.top, 2)
-                .padding(.trailing, 14)
         }
         .overlay {
             if isDropTargeted {
@@ -159,7 +157,6 @@ struct NoteEditorView: View {
             TextField("Untitled Note", text: note.title)
                 .textFieldStyle(.plain)
                 .font(.system(size: 26, weight: .bold))
-                .padding(.trailing, 72)
             HStack(spacing: 14) {
                 DatePicker("", selection: note.createdAt, displayedComponents: .date)
                     .labelsHidden()
@@ -512,12 +509,6 @@ struct NoteEditorView: View {
 
     // MARK: - Actions menu
 
-    /// Fully round, to read like the system sidebar-toggle button across the
-    /// titlebar. That button is square enough that its corners look circular; a
-    /// fixed corner radius on something this wide reads as a rounded rectangle
-    /// instead, so the radius has to track half the height — i.e. a capsule.
-    private static let pillShape = Capsule()
-
     private func actionsMenu(current: Note) -> some View {
         Menu {
             Button {
@@ -589,30 +580,20 @@ struct NoteEditorView: View {
                 Label("Delete Note", systemImage: "trash")
             }
         } label: {
-            // Sized with resizable frames, not a font: the menu's own control
-            // metrics win over the label's font, which is what kept this glyph
-            // at ~11pt however large the font asked to be. Padding lives inside
-            // the label so the whole pill opens the menu, not just the glyph.
-            HStack(spacing: 4) {
-                Image(systemName: "ellipsis.circle")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 19, height: 19)
-                Image(systemName: "chevron.down")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 10, height: 10)
-            }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .contentShape(Self.pillShape)
+            // No frames, font, or padding: this is a toolbar item now, and the
+            // toolbar's own control metrics are what line it up with the sidebar
+            // toggle and the back arrow. Sizing it by hand is what would break
+            // that alignment — the previous floating-pill version had to fight
+            // the menu's metrics with resizable frames precisely because it was
+            // not in the toolbar.
+            Label("More actions", systemImage: "ellipsis.circle")
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .floatingChrome(in: Self.pillShape, interactive: true)
+        // Matches the back arrow's glyph. Set explicitly for the same reason it is
+        // there: `ContentView`'s `.tint` does not reach the window toolbar. Read
+        // straight from `Theme.current` rather than passed in, because this view
+        // sits inside the `.id(themeRefreshTick)` group and is rebuilt on a theme
+        // change — the back arrow's toolbar is applied outside it and is not.
+        .foregroundStyle(Theme.current.accentColor)
         .help("More actions")
     }
 

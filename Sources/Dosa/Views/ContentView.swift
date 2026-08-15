@@ -19,6 +19,15 @@ struct ContentView: View {
         )
     }
 
+    /// True exactly when the detail pane is showing something other than Welcome.
+    /// Mirrors `body`'s branches rather than testing `selectedNoteIds` directly: a
+    /// selected id whose note no longer resolves falls through to Welcome, and a
+    /// back arrow floating over the home screen is the one wrong state possible here.
+    private var isShowingDetail: Bool {
+        if let id = appState.singleSelectedNoteId { return store.note(id: id) != nil }
+        return appState.selectedNoteIds.count > 1
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(selectedNoteIds: $appState.selectedNoteIds, showSettings: $showSettings)
@@ -44,6 +53,9 @@ struct ContentView: View {
             // Hides the toolbar's material/separator, not the toolbar itself, so
             // the theme fill below paints edge-to-edge under that region while
             // the toolbar keeps its items. See §9b of the design doc.
+            .backToWelcomeToolbar(isVisible: isShowingDetail, tint: Theme.current.accentColor) {
+                appState.selectedNoteIds = []
+            }
             .toolbarBackground(.hidden, for: .windowToolbar)
             .background(Theme.current.editorBackgroundColor.ignoresSafeArea(edges: .top))
         }
