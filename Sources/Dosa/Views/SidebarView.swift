@@ -49,23 +49,40 @@ struct SidebarView: View {
                 }
                 .help("Search all notes and transcripts (⌘K)")
                 Spacer()
-                Menu {
-                    Button("New Note") {
+                // Split into a button and a menu because a Menu's own control
+                // metrics win over its label's font, and its built-in indicator
+                // sits too far from the glyph to size or space explicitly.
+                HStack(spacing: 5) {
+                    Button {
                         let note = store.createNote()
                         selectedNoteIds = [note.id]
+                    } label: {
+                        Image(systemName: "plus")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 15, height: 15)
                     }
-                    Button("Import Audio or Video…") {
-                        importIntoNewNote(folderId: nil)
+                    .help("New note (⌘N)")
+                    Menu {
+                        Button("New Note") {
+                            let note = store.createNote()
+                            selectedNoteIds = [note.id]
+                        }
+                        Button("Import Audio or Video…") {
+                            importIntoNewNote(folderId: nil)
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 8, height: 8)
+                            .fontWeight(.regular)
                     }
-                } label: {
-                    Image(systemName: "plus")
-                } primaryAction: {
-                    let note = store.createNote()
-                    selectedNoteIds = [note.id]
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Import audio or video")
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("New note (⌘N), or use the menu to import audio or video")
             }
             .buttonStyle(.borderless)
             .font(.system(size: 16, weight: .medium))
