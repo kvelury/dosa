@@ -14,25 +14,6 @@ struct SidebarView: View {
     @State private var pendingDeleteIds: Set<UUID> = []
     @State private var deletedNotesExpanded = false
 
-    @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
-    @AppStorage(AppSettings.modelKey) private var geminiModel = AppSettings.defaultModel
-    @AppStorage(AppSettings.deepseekModelKey) private var deepseekModel = AppSettings.defaultDeepSeekModel
-    @AppStorage(AppSettings.anthropicModelKey) private var anthropicModel = AppSettings.defaultAnthropicModel
-
-    /// The model the default provider will actually use, for the footer line.
-    /// Reads the @AppStorage values rather than AppSettings so the line
-    /// refreshes as soon as the model picker changes.
-    private var activeModelName: String {
-        guard AppSettings.supportedProviders.contains(llmProvider) else {
-            return AppSettings.resolveModel(geminiModel)
-        }
-        switch llmProvider {
-        case "Anthropic": return AppSettings.resolveAnthropicModel(anthropicModel)
-        case "DeepSeek": return AppSettings.resolveDeepSeekModel(deepseekModel)
-        default: return AppSettings.resolveModel(geminiModel)
-        }
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -109,9 +90,7 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
                 .help("LLM provider API key, prompts, and app options")
-                (Text("v\(Self.appVersion)")
-                    + Text("  ·  ")
-                    + Text(activeModelName).italic())
+                Text("v\(Self.appVersion)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
