@@ -1,0 +1,51 @@
+---
+description: Pass git commit messages and PR bodies via files, never heredocs
+alwaysApply: true
+---
+
+# Never build a commit message with a heredoc
+
+`git commit -m "$(cat <<'EOF' … EOF)"` has hung this repo's agent shell
+indefinitely. The wrapper layer can rewrite the command (e.g. injecting a
+`--trailer` flag), and if the heredoc's delimiter is lost in that rewrite the
+shell blocks forever waiting for input. git never runs, so there is no timeout
+and no error — just silence.
+
+## Multi-paragraph messages: write a file, point git at it
+
+```bash
+# ❌ BAD — hangs
+git commit -m "$(cat <<'EOF'
+Subject line
+
+Body paragraph.
+EOF
+)"
+
+# ✅ GOOD — write the message with a file-writing tool, then:
+git commit -F .git/COMMIT_MSG_DRAFT
+rm -f .git/COMMIT_MSG_DRAFT
+```
+
+Draft inside `.git/` so the file is never picked up as a working-tree change.
+Same rule for PR bodies: `gh pr create --body-file <path>`, never `--body "$(…)"`.
+
+## Short messages: repeated -m
+
+Each `-m` becomes its own paragraph, with no shell parsing to get wrong.
+
+```bash
+git commit -m "Short subject line" -m "Body explaining why."
+```
+
+## If a git command goes silent for ~30s
+
+Check whether git ever started before assuming it is slow:
+
+```bash
+ls .git/index.lock   # absent  => git never took the lock
+git log -1           # unchanged => no commit was created
+```
+
+No lock and no new commit means the shell is stuck, not git. Killing it is safe
+and leaves the staged index intact — then redo it with `-F`.
