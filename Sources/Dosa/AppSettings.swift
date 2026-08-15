@@ -8,6 +8,16 @@ enum AppSettings {
     static let dosaColorKey = "dosaNotesColor"
     static let themeKey = "themeName"
     static let accentOverrideKey = "accentOverride"
+    static let notificationsEnabledKey = "notificationsEnabled"
+
+    static var notificationsEnabled: Bool { bool(forKey: notificationsEnabledKey, default: true) }
+
+    /// Mirrors currentVerbosity's unset guard — UserDefaults returns a zero
+    /// value for an unset key, which would wrongly treat "never set" as off.
+    static func bool(forKey key: String, default defaultValue: Bool) -> Bool {
+        guard UserDefaults.standard.object(forKey: key) != nil else { return defaultValue }
+        return UserDefaults.standard.bool(forKey: key)
+    }
 
     static let notionClientIdKey = "notionClientId"
     static let notionAccessTokenKey = "notionAccessToken"

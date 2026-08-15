@@ -33,7 +33,7 @@ final class GenerationManager: ObservableObject {
         transcriptionProgress = fraction
     }
 
-    func run(noteId: UUID, store: NotesStore) async {
+    func run(noteId: UUID, store: NotesStore, notifier: NotificationManager) async {
         guard phase == .idle else { return }
         guard let note = store.note(id: noteId) else { return }
 
@@ -149,6 +149,7 @@ final class GenerationManager: ObservableObject {
                 fresh.generationModel = providerModel
                 fresh.generationStyle = AppSettings.verbosityLevelNames[AppSettings.currentVerbosity]
                 store.update(fresh)
+                notifier.post(.notesReady(noteId: noteId, title: fresh.displayTitle))
             }
         } catch {
             let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
