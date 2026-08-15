@@ -105,6 +105,46 @@ private func setupBannerMessage(
     }
 }
 
+/// Chrome for the overlays that float above the editor — the recording bar, the
+/// actions pill, the toast. macOS 26 draws them in Liquid Glass; earlier releases
+/// keep the material + hairline + shadow recipe those overlays shipped with.
+///
+/// `canImport(FoundationModels)` is how the app probes for a macOS 26 SDK at
+/// compile time, same as `AppleTranscriber.advancedAvailable`, so a binary built
+/// against an older SDK still compiles and takes the fallback.
+struct FloatingChrome<S: InsettableShape>: ViewModifier {
+    let shape: S
+    /// Glass that responds to hover and press. Right for a control that is itself
+    /// one button, wrong for a container that holds its own controls.
+    var interactive: Bool = false
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+        } else {
+            material(content)
+        }
+        #else
+        material(content)
+        #endif
+    }
+
+    private func material(_ content: Content) -> some View {
+        content
+            .background(.regularMaterial, in: shape)
+            .overlay(shape.strokeBorder(.quaternary))
+            .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+    }
+}
+
+extension View {
+    func floatingChrome<S: InsettableShape>(in shape: S, interactive: Bool = false) -> some View {
+        modifier(FloatingChrome(shape: shape, interactive: interactive))
+    }
+}
+
 /// Live audio-level bars shown in the floating bar while recording, so the
 /// user can see that real audio is being picked up.
 struct RecordingWaveformView: View {

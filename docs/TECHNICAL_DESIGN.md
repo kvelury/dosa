@@ -2,7 +2,7 @@
 
 **App**: Dosa, a native macOS meeting-notes app
 **Source**: `~/Desktop/DosaApp`
-**Version**: 1.3 · macOS 14+ · Swift 5.9 language mode (built with Swift 6.1 toolchain)
+**Version**: 1.4 · macOS 14+ · Swift 5.9 language mode (built with Swift 6.1 toolchain)
 **Audience**: This doc is the canonical reference for continuing development (human or Claude). It captures architecture, implementation details, design decisions, and gotchas discovered during development.
 
 ---
@@ -283,7 +283,7 @@ Full-document restyle on every change (cheap at note scale). Per line: headings 
 - `Theme.swift`: `ThemePalette` tokens — `accent`, `highlight`, `highlightDeep` (welcome-glyph gradient bottom), `editorBackground`, `cardFill`, `codeSpan`, `defaultDosaColorName` — every token a dynamic `NSColor(name:nil){appearance…}` with light/dark variants. Five presets: **Classic** (blue/orange/system), **Crepe** (espresso/caramel/cream — deliberately hue-separated from Masala), **Masala** (red-orange/saffron), **Chutney** (greens/mint), **Slate** (graphite/steel).
 - Overrides on top of any preset: **Accent Override** (Blue/Purple/Pink/Green/Graphite — red excluded deliberately; it means destructive/record) and **Dosa Notes Color** (Grey/Purple/Red/Dark Blue/Dark Green + "Theme Default" which follows the preset; stored value "Theme Default" or unset ⇒ preset default via `AppSettings.currentDosaColorName`).
 - Application: root `.tint(Theme.current.accentColor)` in ContentView (covers selection, sliders, pickers, chips, links); explicit `Theme.current.*` reads for play button, backgrounds, stat cards, key-cap chips, markdown bullet/code colors, search-match highlight, welcome gradient.
-- **Not themeable by design**: body text (system label colors), destructive red, translucent materials (floating bar/toasts), sidebar material.
+- **Not themeable by design**: body text (system label colors), destructive red, the floating overlays' translucent chrome (floating bar / ⋯ pill / toasts — see `FloatingChrome` in §9c), sidebar material.
 - **Refresh model**: views re-render via `@AppStorage` observation of the theme keys, editors re-style via `Theme.styleFingerprint` comparison, and — the sledgehammer that guarantees "everything at once" — closing Settings bumps `AppState.themeRefreshTick`, and ContentView has `.id(appState.themeRefreshTick)` on the NavigationSplitView, rebuilding the whole tree. Side effect: sidebar disclosure state resets after Settings closes. `AppSettings.applyAppearance()` maps the Appearance picker (auto/light/dark) to `NSApp.appearance`, applied on change and at launch.
 
 ---
@@ -351,6 +351,44 @@ The last round of this produced a toggle floating in the vertical middle of the 
 **Enforcement:** `Scripts/check-window-chrome.sh` fails the build on every forbidden API above; `build.sh` runs it before compiling. If it fires, the fix is to delete the offending call, not to add an exception.
 
 **Required verification for any UI-touching change:** `./build.sh`, quit any running Dosa, `open build/Dosa.app`, and confirm the invariants above against a known-good window. Collapse and reopen the sidebar, and resize the window.
+
+---
+
+## 9c. Floating overlay chrome (Liquid Glass, with a pre-26 fallback)
+
+Three overlays float above the editor and share one look: the recording bar (bottom), the ⋯ actions
+pill (top-trailing), and the toast (top). `FloatingChrome` in `SharedViews.swift` is that look, and
+it is the only place the decision is made — `.floatingChrome(in: shape, interactive:)` at the three
+call sites in `NoteEditorView.swift`.
+
+- **macOS 26+**: `.glassEffect(.regular, in: shape)` — real Liquid Glass, which brings its own edge
+  highlight, shadow, and the automatic Reduce Transparency / Increase Contrast handling, so the
+  glass branch adds no stroke or shadow of its own.
+- **macOS 14–15**: the pre-26 recipe those overlays shipped with — `.regularMaterial` in the same
+  shape, a `.quaternary` hairline, and a 10 pt/15 % shadow.
+
+Two guards, because "no Liquid Glass" has two causes. `#if canImport(FoundationModels)` covers a
+build machine on a pre-26 SDK, where `glassEffect` is not a symbol and the call has to vanish at
+compile time (same SDK probe as `AppleTranscriber.advancedAvailable`). `if #available(macOS 26.0, *)`
+covers a Mac on 14/15 running a binary built with the 26 SDK — the case that matters for shipping,
+since `Package.swift` still targets macOS 14.
+
+Details that are load-bearing:
+
+- `interactive: true` **only** for the ⋯ pill. `Glass.interactive()` is for a control that is itself
+  one button; on a container holding its own controls it would light the whole surface up when the
+  pointer approaches any control inside it.
+- Glass is applied **last**, after padding and `clipShape`, per Apple's "apply `glassEffect` after
+  other modifiers that affect appearance." In the recording bar the `clipShape` sits above the
+  chrome so the transcription progress hairline is clipped as content and stays *above* the glass
+  (glass renders behind the content it wraps).
+- No `GlassEffectContainer`: it exists to blend and morph *adjacent* glass shapes, and these three
+  are single isolated surfaces in different corners. Add one only if two glass shapes ever sit side
+  by side.
+- Buttons inside the bar stay `.bordered` / `.borderedProminent`. Those pick up the 26 look
+  automatically when recompiled, and glass-on-glass is explicitly against Apple's guidance.
+- Glass refracts what is behind it, so over the editor's flat background it reads as a subtle tint
+  rather than the dramatic refraction in Apple's marketing. That is correct output, not a failure.
 
 ---
 

@@ -86,7 +86,7 @@ final class NotionMCPClient {
                 "capabilities": [:],
                 "clientInfo": [
                     "name": "Dosa",
-                    "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.3",
+                    "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4",
                 ],
             ],
             accessToken: accessToken,
