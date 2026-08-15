@@ -29,7 +29,7 @@ Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), 
 
 **Dev loop**: `swift build` to typecheck; `./build.sh && open build/Dosa.app` to ship. Kill the running app first (`pkill -x Dosa`).
 
-> **CALLOUT — TCC and ad-hoc signing**: every rebuild re-signs with a new ad-hoc identity, so macOS may re-prompt for Microphone and Screen & System Audio Recording permissions after rebuilds. This is expected. A real Developer ID cert would fix it.
+> **CALLOUT — TCC and ad-hoc signing**: every rebuild re-signs with a new ad-hoc identity, so macOS may re-prompt for Microphone, Screen & System Audio Recording, and notification authorization after rebuilds. This is expected. A real Developer ID cert would fix it.
 
 ```
 Sources/Dosa/
@@ -45,6 +45,7 @@ Sources/Dosa/
   AnthropicClient.swift  Anthropic Messages API REST client (text-only)
   DeepSeekClient.swift   DeepSeek chat/completions REST client (text-only)
   GenerationManager.swift  Transcribe→generate pipeline, cancellation, post-processing
+  NotificationManager.swift  Recording-saved / notes-ready routing: toast if frontmost, macOS banner if not
   DiffEngine.swift       Tokenizer + attributed diff + Dosa-color registry
   SearchService.swift    Match finding, snippets, SearchCoordinator (reveal bus)
   Notion/
@@ -226,6 +227,7 @@ Pipeline per note: **transcribe (if no cached transcript) → generate**.
 - The transcript prompt tells the model the recorder's name = mic voice (fixes wrong-name guessing). "Re-transcribe & Regenerate" (⋯ menu) clears the cached transcript first.
 - Post-processing of generated markdown, in order: `stripCodeFence` → `stripLeadingTitleAndDate` (drops a leading `# Title` + date-ish line — the app header already shows both) → `normalizeBullets` (rewrites `*`/`+` list markers to `-`; see §6 callout).
 - **Cancellation**: the view creates the Task and `register()`s it with the manager; the floating-bar button becomes "Stop Transcribing"/"Stop Generating" → `cancel()`. URLSession honors task cancellation; `CancellationError`/`URLError.cancelled` are swallowed (no error dialog). A completed transcription survives a cancelled generation (it's stored as soon as it finishes).
+- On success, posts `.notesReady` through `NotificationManager` (§11b) before the `defer` resets `phase`. Error paths stay on `ErrorDialogView` (§13); cancellation stays silent.
 - Publishes `phase` (idle/transcribing/generating), `activeNoteId` (drives floating-bar spinner AND the sidebar row mini-spinner), `errorMessage` + `errorDetail`.
 
 ### 5.3 Prompt defaults (`AppSettings.swift`)
@@ -526,7 +528,7 @@ Per-note sync toggle (data-source destinations only); push = debounced `replace_
 
 ## 11. Settings (`SettingsView.swift`)
 
-Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Notion** (§10) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
+Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Notion** (§10) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Notifications** (§11b) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
 
 - **Model and Notes Style are also reachable from the recording bar's quick-settings tab** (§9d),
   which writes the same UserDefaults keys through `@AppStorage` — the two views stay in lockstep in
@@ -535,10 +537,24 @@ Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) �
   `AppSettings.selectModel(_:provider:)` — a model choice that didn't also select its provider would
   be stored and never used. `AppSettings.availableModels(for:)` / `modelStorageKey(for:)` are the
   single provider-keyed lookups both views go through.
-- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models.
+- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt, notificationsEnabled). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models. `notificationsEnabled` is Optional so older exported JSON still decodes.
 - Closing Settings bumps `themeRefreshTick` (§8).
 
 > **CALLOUT — Form footer text on macOS 26 right-aligns wrapped lines** unless you add `.multilineTextAlignment(.leading)` (plus `.fixedSize(horizontal: false, vertical: true)` and a leading-aligned max-width frame). All footers here do this; keep the pattern for new ones. Similarly, a bare `Slider` or segmented `Picker` in a grouped Form gets shoved into the trailing "value column" (provider tabs hug the leading edge) — give it a hidden empty label + `.frame(maxWidth: .infinity)`.
+
+---
+
+## 11b. Notifications (`NotificationManager.swift`)
+
+Transcription + generation can run for minutes, and a large import transcodes before it lands. `NotificationManager` announces two events: **recording saved** (in-app record or import) and **notes ready** (generation success).
+
+**Routing**: if `NSApp.isActive`, post an in-app toast (the same capsule overlay the editor used to own, now on ContentView's detail `Group` so it survives note switches and Welcome). If Dosa is in the background, post a `UNUserNotification` banner titled "Recording saved" / "Notes ready" with the note's `displayTitle` as the body. Tapping the banner activates Dosa and sets `pendingOpenNoteId`; ContentView writes that into `AppState.selectedNoteIds`. `willPresent` returns `[]` so a banner never stacks on a toast if Dosa came forward between post and delivery.
+
+**One Settings toggle**, directly above Theme, defaults on. It gates **macOS banners only** — export toasts (Notion, recording file, markdown) and the in-app messages for these two events still fire with the toggle off. Authorization is requested lazily (`ensureAuthorized`) on first banner post and when the toggle is turned on, never at launch — same posture as mic/screen/speech (§4.1). A denied status surfaces a warning row in the section with an "Open System Settings" button.
+
+Events are posted from app-lifetime objects, not views, wherever the work can outlive the editor: `GenerationManager.run` for notes-ready (the editor is rebuilt via `.id(id)` on selection change), `NoteEditorView.stopRecording` / `beginImport` for the two user-facing saves. Do **not** hook `NotesStore.setRecording` — one of its three call sites is launch recovery and would fire on every start.
+
+`UNUserNotificationCenter.current()` traps without a bundle identifier, so `NotificationManager.init` and `postBanner` no-op unless `Bundle.main.bundleIdentifier != nil`. Launch the `.app`, never `.build/release/Dosa`.
 
 ---
 
@@ -561,7 +577,7 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 
 ## 14. Known quirks & operational notes (consolidated)
 
-1. **TCC re-prompts after rebuild** (ad-hoc signing) — §2.
+1. **TCC re-prompts after rebuild** (ad-hoc signing) — Microphone, Screen & System Audio Recording, and notification authorization. Same cause: `build.sh` re-signs with a new ad-hoc identity, so TCC treats each build as a new app — §2, §11b.
 2. **`store.json` decode fragility** — new model fields must be Optional — §3.1.
 3. **Gemini `gemini-3.6-flash` 500s on audio**; retired-model remaps; fallback chain — §5.1.
 4. **NSScrollView contentInsets tiling bug** → `PaddedTextView.textContainerOrigin` approach — §6.1.

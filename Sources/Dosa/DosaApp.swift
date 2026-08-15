@@ -61,6 +61,7 @@ struct DosaApp: App {
     @StateObject private var search = SearchCoordinator()
     @StateObject private var appState = AppState()
     @StateObject private var notion = NotionManager()
+    @StateObject private var notifier = NotificationManager()
 
     var body: some Scene {
         WindowGroup("Dosa") {
@@ -72,6 +73,7 @@ struct DosaApp: App {
                 .environmentObject(search)
                 .environmentObject(appState)
                 .environmentObject(notion)
+                .environmentObject(notifier)
                 .frame(minWidth: 940, minHeight: 620)
         }
         .windowStyle(.hiddenTitleBar)

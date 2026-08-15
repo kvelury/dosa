@@ -10,6 +10,7 @@ struct NoteEditorView: View {
     @EnvironmentObject private var search: SearchCoordinator
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notion: NotionManager
+    @EnvironmentObject private var notifier: NotificationManager
 
     let noteId: UUID
     @Binding var selectedNoteId: UUID?
@@ -29,7 +30,6 @@ struct NoteEditorView: View {
     @State private var isDropTargeted = false
     @State private var localError: String?
     @State private var localErrorDetail: String?
-    @State private var toast: String?
     @State private var showNoteSearch = false
     @State private var showQuickSettings = false
     /// Measured height of the bar's top box — the pull-tab, plus the panel when
@@ -138,17 +138,6 @@ struct NoteEditorView: View {
                 message: localError ?? generator.errorMessage ?? "An unknown error occurred.",
                 detail: localError != nil ? localErrorDetail : generator.errorDetail
             )
-        }
-        .overlay(alignment: .top) {
-            if let toast {
-                Text(toast)
-                    .font(.callout)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .floatingChrome(in: Capsule())
-                    .padding(.top, 10)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
         }
     }
 
@@ -700,27 +689,13 @@ struct NoteEditorView: View {
             defer { isImporting = false }
             do {
                 try await store.importRecording(from: url, into: noteId)
-                showToast(importToastMessage(for: url), duration: importToastDuration)
+                let title = store.note(id: noteId)?.displayTitle ?? "Untitled Note"
+                notifier.post(.recordingImported(noteId: noteId, title: title, fileName: url.lastPathComponent))
             } catch {
                 localError = error.localizedDescription
                 localErrorDetail = (error as? DetailedError)?.errorDetail
             }
         }
-    }
-
-    /// Imported files have no `-mic`/`-system` side tracks, so on-device transcription
-    /// falls back to unlabeled lines. Say so at import time rather than letting it be a
-    /// surprise in the transcript.
-    private var importLosesSpeakerLabels: Bool {
-        AppSettings.resolvedTranscriptionEngine != .gemini
-    }
-
-    private var importToastDuration: TimeInterval { importLosesSpeakerLabels ? 6.5 : 2.8 }
-
-    private func importToastMessage(for url: URL) -> String {
-        let name = url.lastPathComponent
-        guard importLosesSpeakerLabels else { return "Imported \(name)" }
-        return "Imported \(name) — on-device transcription can't separate speakers on imported files. Switch Transcription to Gemini in Settings for speaker names."
     }
 
     /// Leaves this note exactly as it is and starts over in a fresh note in the same
@@ -761,6 +736,8 @@ struct NoteEditorView: View {
                     fileName: recording.fileName,
                     duration: recording.duration
                 )
+                let title = store.note(id: recording.noteId)?.displayTitle ?? "Untitled Note"
+                notifier.post(.recordingSaved(noteId: recording.noteId, title: title))
             } catch {
                 localError = error.localizedDescription
             }
@@ -769,7 +746,7 @@ struct NoteEditorView: View {
 
     private func generate() {
         let task = Task {
-            await generator.run(noteId: noteId, store: store)
+            await generator.run(noteId: noteId, store: store, notifier: notifier)
             if generator.errorMessage == nil, !Task.isCancelled,
                store.note(id: noteId)?.enhancedMarkdown != nil {
                 viewMode = .aiNotes
@@ -806,7 +783,7 @@ struct NoteEditorView: View {
         Task {
             let wasUpdate = note.notionPageId != nil
             if await notion.export(note: note, store: store) {
-                showToast(wasUpdate ? "Updated in Notion" : "Exported to Notion")
+                notifier.showToast(wasUpdate ? "Updated in Notion" : "Exported to Notion")
             } else if let message = notion.errorMessage {
                 localErrorDetail = notion.errorDetail
                 localError = message
@@ -822,7 +799,7 @@ struct NoteEditorView: View {
         }
         do {
             let url = try FileExporter.copyToDownloads(from: sourceURL, baseName: "\(note.displayTitle) Recording")
-            showToast("Saved to Downloads as \(url.lastPathComponent)")
+            notifier.showToast("Saved to Downloads as \(url.lastPathComponent)")
         } catch {
             localError = error.localizedDescription
         }
@@ -831,17 +808,9 @@ struct NoteEditorView: View {
     private func saveToDownloads(markdown: String, baseName: String) {
         do {
             let url = try FileExporter.saveToDownloads(markdown: markdown, baseName: baseName)
-            showToast("Saved to Downloads as \(url.lastPathComponent)")
+            notifier.showToast("Saved to Downloads as \(url.lastPathComponent)")
         } catch {
             localError = error.localizedDescription
-        }
-    }
-
-    private func showToast(_ message: String, duration: TimeInterval = 2.8) {
-        withAnimation { toast = message }
-        Task {
-            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
-            withAnimation { toast = nil }
         }
     }
 }

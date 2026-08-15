@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var recorder: AudioRecorder
+    @EnvironmentObject private var notifier: NotificationManager
     @State private var interruptionMessage: String?
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
@@ -48,6 +49,17 @@ struct ContentView: View {
                 }
             }
             .id(appState.themeRefreshTick)
+            .overlay(alignment: .top) {
+                if let toast = notifier.toast {
+                    Text(toast)
+                        .font(.callout)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .floatingChrome(in: Capsule())
+                        .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .modifier(SetupBannerInset(onOpenSettings: { appState.showSettings = true }))
             // Hides the toolbar's material/separator, not the toolbar itself, so
             // the theme fill below paints edge-to-edge under that region while
@@ -84,6 +96,12 @@ struct ContentView: View {
                 appState.selectedNoteIds = [recovered.noteId]
             }
             interruptionMessage = interruption.message
+        }
+        .onChange(of: notifier.pendingOpenNoteId) { _, id in
+            guard let id else { return }
+            notifier.pendingOpenNoteId = nil
+            guard store.note(id: id) != nil else { return }
+            appState.selectedNoteIds = [id]
         }
         .onAppear {
             AppSettings.applyAppearance()

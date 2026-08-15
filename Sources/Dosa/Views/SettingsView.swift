@@ -18,12 +18,14 @@ private struct SettingsSnapshot: Codable {
     var dosaNotesColor: String?
     var notesPrompt: String?
     var transcriptPrompt: String?
+    var notificationsEnabled: Bool?
 }
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notion: NotionManager
+    @EnvironmentObject private var notifier: NotificationManager
 
     @AppStorage(AppSettings.userNameKey) private var userName = ""
     @AppStorage(AppSettings.appearanceKey) private var appearance = "auto"
@@ -31,6 +33,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.dosaColorKey) private var dosaColor = "Theme Default"
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
+    @AppStorage(AppSettings.notificationsEnabledKey) private var notificationsEnabled = true
     @AppStorage(AppSettings.apiKeyKey) private var apiKey = ""
     @AppStorage(AppSettings.modelKey) private var model = AppSettings.defaultModel
     @AppStorage(AppSettings.llmProviderKey) private var defaultProvider = "Gemini"
@@ -373,6 +376,36 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Enable notifications", isOn: $notificationsEnabled)
+                    if notifier.authorizationDenied {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                            Text("macOS is blocking Dosa's notifications.")
+                            Spacer()
+                            Button("Open System Settings") {
+                                NSWorkspace.shared.open(URL(string:
+                                    "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+                            }
+                        }
+                        .font(.caption)
+                    }
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("Dosa tells you when a recording is saved and when generated notes are ready. macOS banners only appear when Dosa isn't the active app — while you're in Dosa you'll get an in-app message instead.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .onChange(of: notificationsEnabled) { _, enabled in
+                    guard enabled else { return }
+                    Task { await notifier.ensureAuthorized() }
+                }
+                .task { await notifier.ensureAuthorized() }
+
+                Section {
                     HStack(spacing: 10) {
                         ForEach(Theme.presetNames, id: \.self) { name in
                             themeCard(name)
@@ -586,7 +619,8 @@ struct SettingsView: View {
             accentOverride: accentOverride,
             dosaNotesColor: dosaColor,
             notesPrompt: notesPrompt,
-            transcriptPrompt: transcriptPrompt
+            transcriptPrompt: transcriptPrompt,
+            notificationsEnabled: notificationsEnabled
         )
         do {
             let encoder = JSONEncoder()
@@ -623,6 +657,7 @@ struct SettingsView: View {
                (["Theme Default"] + AppSettings.dosaColorOptions).contains(value) { dosaColor = value }
             if let value = snapshot.notesPrompt { notesPrompt = value }
             if let value = snapshot.transcriptPrompt { transcriptPrompt = value }
+            if let value = snapshot.notificationsEnabled { notificationsEnabled = value }
             AppSettings.applyAppearance()
             backupStatus = "Settings imported from \(url.lastPathComponent)."
         } catch {
