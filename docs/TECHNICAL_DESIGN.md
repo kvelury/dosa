@@ -63,8 +63,7 @@ Sources/Dosa/
     WelcomeView.swift    Greeting, stats, shortcut hints
     DeletedNoteView.swift  Trash preview with restore/delete
     SharedViews.swift    RecordingWaveformView, ErrorDialogView, MultiSelectionView
-  Branding.swift         DosaMark view — loads dosa-mark-{light,dark}.png from Bundle.main,
-                         picks by @Environment(\.colorScheme)
+  Branding.swift         DosaMark (baked PNGs) + DosaWatermark (Canvas rings for WelcomeView)
 Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
 Resources/Branding/     Source SVGs (app icon, in-app mark, menu-bar templates — see §2b)
 build.sh / Scripts/make_icon.swift
@@ -75,7 +74,7 @@ build.sh / Scripts/make_icon.swift
 All 7 source SVGs delivered with the current logo are committed under `Resources/Branding/` as the source of truth, but only two are wired into the app today:
 
 - `dosa-icon-1024.svg` → the app icon (`Resources/AppIcon.icns`).
-- `dosa-mark-currentcolor.svg` → the in-app brand mark (`DosaMark`), shown at `WelcomeView`'s hero size and in the sidebar footer next to the version/model line.
+- `dosa-mark-currentcolor.svg` → the in-app brand mark (`DosaMark`), shown in the sidebar footer next to the version/model line. `WelcomeView` uses a matching vector backdrop (`DosaWatermark` in `Branding.swift`): the same rings (r = 70 / 52 / 34, dash gaps, rotations, filled core) drawn in a `Canvas` so they stay sharp at any window size, tinted from the active theme's `highlight` (not the brown/amber of `DosaMark`), and top-anchored so they sweep down over the upper half of the pane. The watermark replaced the old 112-pt hero `DosaMark` at the top of the welcome stack; the greeting now leads that stack in its place.
 
 Both use `NSImage(contentsOfFile:)` to rasterize the *actual* SVG at build time rather than hand-reproducing the geometry in AppKit/SwiftUI — verified pixel-accurate against these files (plain `<rect>`/`<g transform>`/`<circle>` + `stroke-dasharray`, no CSS). `DosaMark` itself does zero SVG/asset loading at runtime beyond reading two plain PNGs baked at build time (`dosa-mark-light.png` / `dosa-mark-dark.png`) via `Bundle.main` — deliberately *not* SwiftPM's `resources:`/`Bundle.module` mechanism, since this project hand-assembles its `.app` in `build.sh` rather than letting SwiftPM produce one, and `Bundle.module`'s companion resource bundle would need its own separate copy step to land inside `build/Dosa.app/Contents/Resources/`. Reusing the exact `Resources/` → `cp` → `Bundle.main` path already proven for `Info.plist`/`AppIcon.icns` avoids that whole class of packaging bug.
 
@@ -83,7 +82,7 @@ The mark is brand-fixed brown/amber (`#7A4512` / `#E0A44E`) regardless of which 
 
 **Not yet wired up**: `dosa-menubarTemplate.svg` / `dosa-menubarRecordingTemplate.svg` — flat-black idle/recording icons sized for an `NSStatusItem`/`MenuBarExtra`, which Dosa doesn't have. `dosa-mark-cream.svg` (a lighter alternate mark, e.g. for a dark solid-color hero) and `dosa-mark-adaptive.svg` (the CSS self-adapting version — kept as reference for the intended color pairing, not for rendering) are also unused. All are preserved in `Resources/Branding/` for whenever those features exist.
 
-**Window chrome**: `.windowStyle(.hiddenTitleBar)` — no title bar; traffic lights overlay the sidebar's top-left, which is why the sidebar's icon row has `.padding(.top, 34)`.
+**Window chrome**: `.windowStyle(.hiddenTitleBar)` — no title bar; traffic lights overlay the sidebar's top-left, which is why the sidebar's icon row has `.padding(.top, 34)`. The sidebar-toggle is a single overlay button immediately to the right of those lights (not a toolbar item — those duplicate and miss the lights). Do not mutate the `NSWindow` to "finish" this look — see §9b.
 
 ---
 
@@ -305,6 +304,56 @@ Full-document restyle on every change (cheap at note scale). Per line: headings 
 
 ---
 
+## 9b. Window chrome & UI invariants
+
+`.windowStyle(.hiddenTitleBar)` on the `WindowGroup` is the **only** window-styling call. Traffic lights overlay the sidebar; `NavigationSplitView` still owns a window toolbar. The detail column's empty title slot otherwise shows through as a light/dark strip along the top of Welcome (the sidebar already draws under that region). The sanctioned fill is on the detail `Group` in `ContentView`:
+
+```swift
+.toolbarBackground(.hidden, for: .windowToolbar)
+.background(Theme.current.editorBackgroundColor.ignoresSafeArea(edges: .top))
+```
+
+That hides the toolbar's material/separator, not the toolbar itself, so items and traffic lights stay, and the theme color paints under the now-transparent region.
+
+**The sidebar toggle is the system's, and stays where macOS puts it.** `NavigationSplitView` supplies its own toggle in the window toolbar and manages column visibility itself. `ContentView` therefore takes no `columnVisibility` binding and adds no toggle of its own. Yes, the system toggle sits near the split rather than tucked against the traffic lights — that is standard macOS placement (Notes, Mail), and it is not a bug to be corrected.
+
+Every attempt to relocate it has made things worse, because the traffic lights live in the window's titlebar view, which is a *sibling* of SwiftUI's content view — not inside it. Any hand-placed button is therefore positioned in the wrong coordinate space and drifts with window size, sidebar width, and macOS version:
+
+```swift
+// ❌ All of these have shipped a broken window. Do not reintroduce.
+NavigationSplitView(columnVisibility: $columnVisibility) { … }   // hand-driven visibility
+.toolbar(removing: .sidebarToggle)                               // strips the only real toggle
+.overlay(alignment: .topLeading) { Button { … } }                // lands mid-sidebar
+NSViewRepresentable { … window.standardWindowButton(.zoomButton) }  // wrong coordinate space
+```
+
+The last round of this produced a toggle floating in the vertical middle of the sidebar, a dead strip across the top, and a sidebar that no longer drew under the titlebar. The fix was deletion, not more geometry.
+
+**Invariants that must hold after any UI change:**
+
+1. Traffic lights visible at the top-left of the window.
+2. Exactly one sidebar toggle, the system's, in the window toolbar. No second toggle, no hand-positioned one.
+3. Sidebar fills the full window height and draws under the traffic lights; its `.padding(.top, 34)` clears them, with no separate blank strip above the folder/search/+ row.
+4. Setup banner appears at the top of the detail pane when the user's name or the default provider's API key is missing; an empty banner must not reserve a strip (`SetupBannerInset` only insets when it has a message).
+5. Welcome and the note editor both render correctly in light and dark, and across theme presets.
+
+**Rules — do not:**
+
+- `.toolbar(.hidden, for: .windowToolbar)` — removes the sidebar toggle. Combined with a collapsed titlebar, traffic lights vanish and the sidebar's `.padding(.top, 34)` becomes a dead strip. This shipped once.
+- `.toolbar(removing: .sidebarToggle)` — leaves the window with no way to show a collapsed sidebar. This shipped once.
+- Mutate `NSWindow` `styleMask` / `titleVisibility` / `titlebarAppearsTransparent`, or read `standardWindowButton(_:)` to position SwiftUI views, from an `NSViewRepresentable` (or any AppKit poke). That fights SwiftUI's window management and is what killed the traffic lights (`HiddenTitleBarChrome`) and misplaced the toggle (`TrafficLightAnchor`).
+- `toolbar(removing: .title)` / `HideSplitViewTitle` as a strip-removal trick. Same class of chrome collapse.
+- Add a `ToolbarItem` sidebar toggle, or drive `columnVisibility` by hand, to "reposition" the system toggle.
+- Put window styling anywhere except `.windowStyle(...)` on the `Scene`.
+
+**Do:** for edge-to-edge content in the detail pane, `.toolbarBackground(.hidden, for: .windowToolbar)` + `.background(...).ignoresSafeArea(edges: .top)` — the two lines above. If a view sits too high or too low, adjust *that view's* padding, and keep it inside normal layout flow (a top-anchored `VStack`/overlay reaching into the titlebar region is how the Welcome greeting ended up jammed against the window edge) — never touch the window.
+
+**Enforcement:** `Scripts/check-window-chrome.sh` fails the build on every forbidden API above; `build.sh` runs it before compiling. If it fires, the fix is to delete the offending call, not to add an exception.
+
+**Required verification for any UI-touching change:** `./build.sh`, quit any running Dosa, `open build/Dosa.app`, and confirm the invariants above against a known-good window. Collapse and reopen the sidebar, and resize the window.
+
+---
+
 ## 10. Notion integration (hosted MCP — not the REST API)
 
 **Decision**: Dosa talks to Notion's **hosted MCP server** (`https://mcp.notion.com/mcp`) as a deterministic client. Why not REST: MCP's OAuth mandates **Dynamic Client Registration**, so there is *no manual integration registration and no embedded client secret* — and the MCP tools accept/return Notion-flavored **markdown**, eliminating a markdown↔blocks converter. Trade-off: tool response formats are LLM-oriented text/JSON and may drift — all parsing is deliberately tolerant (see callouts).
@@ -398,10 +447,13 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 15. **ADTS `.aac` overstates its duration** — no container length, so it's estimated from bitrate; hence `DurationCheck.lenient` for imports — §4.3.
 16. **`NSTextView` swallows file drags** and pastes the path as text — media drops are intercepted in `PaddedTextView`, not SwiftUI — §4.2.
 17. Swift concurrency: Swift 5 language mode; Sendable warnings exist and are accepted. `NotesStore` non-isolated on purpose; managers `@MainActor`.
+18. **Hiding the window toolbar killed traffic lights + sidebar toggle** — `.toolbar(.hidden, for: .windowToolbar)` plus an `NSWindow` `styleMask` poke (`HiddenTitleBarChrome`) collapsed the titlebar; the sidebar's traffic-light padding became a dead strip. This shipped once. Use `.toolbarBackground(.hidden, …)` instead — §9b.
+19. **Relocating `NavigationSplitView`'s sidebar toggle is a trap** — it sits near the split, not by the traffic lights, and that is standard macOS placement. A `ToolbarItem` replacement duplicates it; an overlay positioned from `standardWindowButton(.zoomButton)` is measured against the titlebar view, a sibling of SwiftUI's content view, and landed mid-sidebar with a dead strip on top. Both shipped. Leave the system toggle alone — §9b, enforced by `Scripts/check-window-chrome.sh`.
 
 ## 15. Verification checklist (manual)
 
 1. `./build.sh && open build/Dosa.app` — app launches, welcome shows stats + shortcut hints.
+1b. Window chrome intact: traffic lights at top-left, exactly one (system) sidebar toggle in the toolbar, sidebar full-height with no dead strip above its header. Collapse and reopen the sidebar. Welcome watermark + greeting with no white strip at the top of the detail pane.
 2. Record (mic + play a video) → waveform bounces → stop → play with scrub bar.
 2b. Import: drag an `.mp4` onto a note, and repeat via ⌘O / sidebar `+` / ⋯ menu → play button with the right duration → Generate produces a transcript. Import onto a note that already has audio → prompt appears; "Import into a New Note" leaves the original untouched; after "Replace It" the previous `.m4a` is still in `Recordings/` under its old timestamped name.
 3. Generate Notes → sidebar row spinner → Dosa Notes tab with diff colors → Re-generate label; Stop mid-run cancels silently.

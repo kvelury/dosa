@@ -14,33 +14,38 @@ struct WelcomeView: View {
     }
 
     var body: some View {
-        VStack(spacing: 30) {
-            DosaMark()
-                .frame(width: 112, height: 112)
+        ZStack {
+            DosaWatermark(color: Theme.current.highlightColor)
+                .ignoresSafeArea(edges: .top)
 
-            VStack(spacing: 10) {
-                Text(greeting)
-                    .font(.largeTitle.bold())
-                Text("Record meetings straight from your Mac's audio — Zoom, Meet, Teams, Huddles, anything — jot quick notes, and let Dosa turn them into polished meeting notes.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 460)
+            VStack(spacing: 30) {
+                VStack(spacing: 10) {
+                    Text(greeting)
+                        .font(.largeTitle.bold())
+                        .multilineTextAlignment(.center)
+
+                    Text("Record meetings straight from your Mac's audio — Zoom, Meet, Teams, Huddles, anything — jot quick notes, and let Dosa turn them into polished meeting notes.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 460)
+                }
+
+                HStack(spacing: 14) {
+                    StatCard(value: "\(store.activeNotes.count)", label: "Notes", icon: "note.text")
+                    StatCard(value: "\(store.meetingsRecorded)", label: "Meetings Recorded", icon: "mic.fill")
+                    StatCard(value: store.totalRecordedTimeText, label: "Time Recorded", icon: "clock")
+                    StatCard(value: "\(store.notesGeneratedCount)", label: "Dosa Summaries", icon: "sparkles")
+                }
+
+                Text("Click + at the top of the sidebar to create your first note.")
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
             }
-
-            HStack(spacing: 14) {
-                StatCard(value: "\(store.activeNotes.count)", label: "Notes", icon: "note.text")
-                StatCard(value: "\(store.meetingsRecorded)", label: "Meetings Recorded", icon: "mic.fill")
-                StatCard(value: store.totalRecordedTimeText, label: "Time Recorded", icon: "clock")
-                StatCard(value: "\(store.notesGeneratedCount)", label: "Dosa Summaries", icon: "sparkles")
-            }
-
-            Text("Click + at the top of the sidebar to create your first note.")
-                .font(.callout)
-                .foregroundStyle(.tertiary)
+            .padding(.horizontal, 24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.current.editorBackgroundColor)
+        .background(Theme.current.editorBackgroundColor.ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) {
             HStack(spacing: 18) {
                 ShortcutHint(keys: "⌘ N", label: "New note")

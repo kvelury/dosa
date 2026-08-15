@@ -24,6 +24,9 @@ for arg in "$@"; do
     esac
 done
 
+echo "==> Checking window chrome…"
+./Scripts/check-window-chrome.sh
+
 echo "==> Building Dosa (release)…"
 swift build -c release
 
