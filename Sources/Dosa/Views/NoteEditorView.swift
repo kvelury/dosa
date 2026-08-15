@@ -199,9 +199,12 @@ struct NoteEditorView: View {
                         Spacer()
                     }
                     if let model = current.generationModel, let style = current.generationStyle {
-                        Text("\(model) | style: \(style)".lowercased())
+                        // Concatenated so the separator stays upright — italicizing
+                        // a bar just makes it look like a stray slash.
+                        (Text(model.lowercased()).italic()
+                            + Text(" | ")
+                            + Text("style: \(style)".lowercased()).italic())
                             .font(.system(size: 13))
-                            .italic()
                             .foregroundStyle(.tertiary)
                     }
                 }
