@@ -143,8 +143,7 @@ struct NoteEditorView: View {
                     .font(.callout)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(.quaternary))
+                    .floatingChrome(in: Capsule())
                     .padding(.top, 10)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -156,7 +155,7 @@ struct NoteEditorView: View {
             TextField("Untitled Note", text: note.title)
                 .textFieldStyle(.plain)
                 .font(.system(size: 26, weight: .bold))
-                .padding(.trailing, 76)
+                .padding(.trailing, 72)
             HStack(spacing: 14) {
                 DatePicker("", selection: note.createdAt, displayedComponents: .date)
                     .labelsHidden()
@@ -244,6 +243,8 @@ struct NoteEditorView: View {
 
     // MARK: - Floating bar
 
+    private static let barShape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+
     private func floatingBar(current: Note) -> some View {
         VStack(spacing: 8) {
             if player.playingNoteId == noteId {
@@ -253,11 +254,9 @@ struct NoteEditorView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(alignment: .top) { chunkingProgressStrip }
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(.quaternary))
-        .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+        .clipShape(Self.barShape)
+        .floatingChrome(in: Self.barShape)
         .padding(.bottom, 14)
         .animation(.easeInOut(duration: 0.18), value: player.playingNoteId == noteId)
         .animation(.easeInOut(duration: 0.2), value: generator.transcriptionProgress)
@@ -455,6 +454,12 @@ struct NoteEditorView: View {
 
     // MARK: - Actions menu
 
+    /// Fully round, to read like the system sidebar-toggle button across the
+    /// titlebar. That button is square enough that its corners look circular; a
+    /// fixed corner radius on something this wide reads as a rounded rectangle
+    /// instead, so the radius has to track half the height — i.e. a capsule.
+    private static let pillShape = Capsule()
+
     private func actionsMenu(current: Note) -> some View {
         Menu {
             Button {
@@ -526,18 +531,30 @@ struct NoteEditorView: View {
                 Label("Delete Note", systemImage: "trash")
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.system(size: 27, weight: .medium))
-                .foregroundStyle(.primary)
+            // Sized with resizable frames, not a font: the menu's own control
+            // metrics win over the label's font, which is what kept this glyph
+            // at ~11pt however large the font asked to be. Padding lives inside
+            // the label so the whole pill opens the menu, not just the glyph.
+            HStack(spacing: 4) {
+                Image(systemName: "ellipsis.circle")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 19, height: 19)
+                Image(systemName: "chevron.down")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 10, height: 10)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .contentShape(Self.pillShape)
         }
-        .menuStyle(.borderlessButton)
-        .controlSize(.large)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
-        .padding(.horizontal, 13)
-        .padding(.vertical, 9)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.quaternary))
-        .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+        .floatingChrome(in: Self.pillShape, interactive: true)
         .help("More actions")
     }
 
