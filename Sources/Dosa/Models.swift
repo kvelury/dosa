@@ -20,6 +20,10 @@ struct Note: Identifiable, Codable, Hashable {
     var notionPageURL: String?
     var pinnedAt: Date?
     var deletedAt: Date?
+    /// Model and note-style used the last time Dosa generated notes for this
+    /// note, for display next to the "your notes / dosa additions" legend.
+    var generationModel: String?
+    var generationStyle: String?
 
     var isPinned: Bool { pinnedAt != nil }
     var isDeleted: Bool { deletedAt != nil }

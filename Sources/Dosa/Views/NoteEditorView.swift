@@ -189,6 +189,12 @@ struct NoteEditorView: View {
         if viewMode == .aiNotes, current.enhancedMarkdown != nil {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 14) {
+                    if let model = current.generationModel, let style = current.generationStyle {
+                        Text("\(model) / style: \(style)".lowercased())
+                            .font(.system(size: 13))
+                            .italic()
+                            .foregroundStyle(.tertiary)
+                    }
                     Label("Your notes", systemImage: "circle.fill")
                         .font(.system(size: 13))
                         .foregroundStyle(.primary)
