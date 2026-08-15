@@ -269,7 +269,7 @@ struct SettingsView: View {
                              destination: URL(string: "https://ai.google.dev/gemini-api/docs/api-key")!)
                             .font(.caption)
                         Picker("Model", selection: $model) {
-                            ForEach(AppSettings.availableModels, id: \.self) { name in
+                            ForEach(AppSettings.availableModels(for: "Gemini"), id: \.self) { name in
                                 Text(name)
                             }
                         }
@@ -285,7 +285,7 @@ struct SettingsView: View {
                              destination: URL(string: "https://platform.claude.com/settings/keys")!)
                             .font(.caption)
                         Picker("Model", selection: $anthropicModel) {
-                            ForEach(AppSettings.availableAnthropicModels, id: \.self) { name in
+                            ForEach(AppSettings.availableModels(for: "Anthropic"), id: \.self) { name in
                                 Text(name)
                             }
                         }
@@ -296,7 +296,7 @@ struct SettingsView: View {
                              destination: URL(string: "https://platform.deepseek.com/api_keys")!)
                             .font(.caption)
                         Picker("Model", selection: $deepseekModel) {
-                            ForEach(AppSettings.availableDeepSeekModels, id: \.self) { name in
+                            ForEach(AppSettings.availableModels(for: "DeepSeek"), id: \.self) { name in
                                 Text(name)
                             }
                         }
@@ -315,33 +315,10 @@ struct SettingsView: View {
                 notionSection
 
                 Section {
-                    VStack(spacing: 6) {
-                        Slider(
-                            value: Binding(
-                                get: { Double(verbosity) },
-                                set: { verbosity = Int($0.rounded()) }
-                            ),
-                            in: 0...4,
-                            step: 1
-                        ) {
-                            EmptyView()
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: .infinity)
-                        HStack {
-                            Text("More Succinct")
-                            Spacer()
-                            Text("Balanced")
-                            Spacer()
-                            Text("More Detailed")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-
+                    // Shared with the floating bar's quick-settings panel, which
+                    // writes the same key — the two are meant to be the same control.
+                    NotesStyleSlider(level: $verbosity)
+                        .padding(.vertical, 4)
                 } header: {
                     Text("Notes Style: \(AppSettings.verbosityLevelNames[min(max(verbosity, 0), 4)])")
                 } footer: {

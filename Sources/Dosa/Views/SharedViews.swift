@@ -145,6 +145,154 @@ extension View {
     }
 }
 
+/// The recording bar's silhouette: a wide plinth with a narrower box centred on
+/// top of it, the two joined by concave fillets. Collapsed, that box is a small
+/// half-oval pull-tab; expanded, it is the quick-settings panel — and because
+/// this is *one* shape with animatable dimensions, the tab morphs into the panel
+/// rather than a second surface fading in on top of the bar.
+///
+/// Drawn as a single continuous outline rather than two overlapping rounded
+/// rectangles. Overlapping subpaths would union correctly under a non-zero fill,
+/// but `FloatingChrome`'s pre-26 branch *strokes* the shape, and a stroke traces
+/// the submerged edges too — printing a hairline seam straight across the
+/// junction. One outline also gives Liquid Glass a single unbroken edge to
+/// highlight, which is what makes the panel read as part of the bar.
+///
+/// This is still one glass surface, so §9c's "add a `GlassEffectContainer` if two
+/// glass shapes ever sit side by side" does not apply.
+struct BarPedestalShape: InsettableShape {
+    /// Width of the box on top — the pull-tab's, or the open panel's.
+    var topWidth: CGFloat
+    /// How far that box rises above the bar. At zero this collapses to a plain
+    /// rounded rectangle, i.e. exactly the bar as it was before the tab existed.
+    var topHeight: CGFloat
+    var topCornerRadius: CGFloat = 12
+    var barCornerRadius: CGFloat = 26
+    /// Radius of the concave flare where the top box meets the bar's top edge.
+    var jointRadius: CGFloat = 10
+    var insetAmount: CGFloat = 0
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(topWidth, topHeight) }
+        set {
+            topWidth = newValue.first
+            topHeight = newValue.second
+        }
+    }
+
+    func inset(by amount: CGFloat) -> BarPedestalShape {
+        var copy = self
+        copy.insetAmount += amount
+        return copy
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let inner = rect.insetBy(dx: insetAmount, dy: insetAmount)
+        guard inner.width > 0, inner.height > 0 else { return Path() }
+
+        // The seam sits at an absolute offset from the frame's top edge, so the
+        // top box loses height to an inset only at its own top.
+        let th = topHeight - insetAmount
+        let barSide = max(inner.height - max(th, 0), 0)
+        let r = max(min(barCornerRadius - insetAmount, inner.width / 2, barSide / 2), 0)
+
+        func plainBar() -> Path {
+            Path(roundedRect: inner, cornerRadius: r, style: .continuous)
+        }
+
+        // An inset stroke sits inside the fillet, so its concave radius grows.
+        let flare = max(jointRadius + insetAmount, 0)
+        // Both shoulders need a straight run of the bar's top edge to flare onto,
+        // so the top box can never reach into the bar's own corners. The bar is
+        // ~430 pt at its narrowest and the panel is 300, so this only bites in
+        // degenerate layouts — but it keeps the arcs from folding back on
+        // themselves if it ever does.
+        let widest = inner.width - 2 * (r + flare)
+        let tw = min(topWidth - 2 * insetAmount, widest)
+        guard th > 0.5, widest > 0, tw > 0 else { return plainBar() }
+
+        let tr = max(min(topCornerRadius - insetAmount, tw / 2, th), 0)
+        let joint = max(min(flare, th - tr), 0)
+
+        let x1 = inner.midX - tw / 2
+        let x2 = inner.midX + tw / 2
+        let top = inner.minY
+        let seam = inner.minY + th
+        let bottom = inner.maxY
+        let left = inner.minX
+        let right = inner.maxX
+
+        // Corner-by-corner with tangent arcs: each call rounds the corner at
+        // `tangent1End` on the way to `tangent2End`. At the two shoulders the
+        // interior angle is reflex, so the same call produces the concave flare.
+        var path = Path()
+        path.move(to: CGPoint(x: inner.midX, y: bottom))
+        path.addArc(tangent1End: CGPoint(x: left, y: bottom),
+                    tangent2End: CGPoint(x: left, y: seam), radius: r)
+        path.addArc(tangent1End: CGPoint(x: left, y: seam),
+                    tangent2End: CGPoint(x: x1, y: seam), radius: r)
+        path.addArc(tangent1End: CGPoint(x: x1, y: seam),
+                    tangent2End: CGPoint(x: x1, y: top), radius: joint)
+        path.addArc(tangent1End: CGPoint(x: x1, y: top),
+                    tangent2End: CGPoint(x: x2, y: top), radius: tr)
+        path.addArc(tangent1End: CGPoint(x: x2, y: top),
+                    tangent2End: CGPoint(x: x2, y: seam), radius: tr)
+        path.addArc(tangent1End: CGPoint(x: x2, y: seam),
+                    tangent2End: CGPoint(x: right, y: seam), radius: joint)
+        path.addArc(tangent1End: CGPoint(x: right, y: seam),
+                    tangent2End: CGPoint(x: right, y: bottom), radius: r)
+        path.addArc(tangent1End: CGPoint(x: right, y: bottom),
+                    tangent2End: CGPoint(x: inner.midX, y: bottom), radius: r)
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Height of the floating bar's top box (the pull-tab, plus the quick-settings
+/// panel when it is open), measured rather than hard-coded so `BarPedestalShape`
+/// carves the silhouette at the size the content actually laid out at.
+struct BarTopBoxHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// The 5-stop Notes Style control. It lives here because it renders in two
+/// places — the Settings form and the floating bar's quick-settings panel — and
+/// being literally the same control in both is the point.
+struct NotesStyleSlider: View {
+    @Binding var level: Int
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Slider(
+                value: Binding(
+                    get: { Double(level) },
+                    set: { level = Int($0.rounded()) }
+                ),
+                in: 0...4,
+                step: 1
+            ) {
+                EmptyView()
+            }
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
+            HStack {
+                Text("More Succinct")
+                Spacer()
+                Text("Balanced")
+                Spacer()
+                Text("More Detailed")
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 /// Live audio-level bars shown in the floating bar while recording, so the
 /// user can see that real audio is being picked up.
 struct RecordingWaveformView: View {
