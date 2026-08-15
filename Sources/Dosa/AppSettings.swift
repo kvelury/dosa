@@ -71,6 +71,36 @@ enum AppSettings {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The UserDefaults key holding a provider's selected note-generation model.
+    /// Mirrors `apiKeyStorageKey(for:)` so provider-keyed storage lives in one
+    /// place rather than being re-spelled at each call site.
+    static func modelStorageKey(for provider: String) -> String {
+        switch provider {
+        case "Anthropic": return anthropicModelKey
+        case "DeepSeek": return deepseekModelKey
+        default: return modelKey
+        }
+    }
+
+    /// Every model a provider can generate notes with — the one place the
+    /// per-provider catalogs below are keyed by provider name.
+    static func availableModels(for provider: String) -> [String] {
+        switch provider {
+        case "Anthropic": return availableAnthropicModels
+        case "DeepSeek": return availableDeepSeekModels
+        default: return Self.availableModels
+        }
+    }
+
+    /// Selecting a model is also selecting its provider. The quick-settings
+    /// panel on the floating bar lists every configured provider's models as one
+    /// menu, so picking one has to move `llmProvider` with it — otherwise the
+    /// choice would be stored but never used.
+    static func selectModel(_ model: String, provider: String) {
+        UserDefaults.standard.set(provider, forKey: llmProviderKey)
+        UserDefaults.standard.set(model, forKey: modelStorageKey(for: provider))
+    }
+
     /// The model a provider will actually use, with stale/unknown stored
     /// values resolved to something currently served.
     static func resolvedModel(for provider: String) -> String {

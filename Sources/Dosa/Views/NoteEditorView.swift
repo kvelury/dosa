@@ -31,6 +31,10 @@ struct NoteEditorView: View {
     @State private var localErrorDetail: String?
     @State private var toast: String?
     @State private var showNoteSearch = false
+    @State private var showQuickSettings = false
+    /// Measured height of the bar's top box — the pull-tab, plus the panel when
+    /// it is open. Seeded at the collapsed height so frame one is already right.
+    @State private var topBoxHeight: CGFloat = NoteEditorView.tabHeight
     @AppStorage(AppSettings.dosaColorKey) private var dosaColorName = "Theme Default"
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
@@ -202,7 +206,7 @@ struct NoteEditorView: View {
                     text: enhancedBinding(note: note),
                     diffAgainst: current.manualText,
                     highlight: editorHighlight,
-                    bottomContentInset: 74,
+                    bottomContentInset: 88,
                     onMediaFileDrop: { requestAudio(.importFile($0)) },
                     onMediaDragChanged: { isDropTargeted = $0 }
                 )
@@ -225,7 +229,7 @@ struct NoteEditorView: View {
                     text: note.manualText,
                     isEditable: current.enhancedMarkdown == nil,
                     highlight: editorHighlight,
-                    bottomContentInset: 74,
+                    bottomContentInset: 88,
                     onMediaFileDrop: { requestAudio(.importFile($0)) },
                     onMediaDragChanged: { isDropTargeted = $0 }
                 )
@@ -243,9 +247,50 @@ struct NoteEditorView: View {
 
     // MARK: - Floating bar
 
-    private static let barShape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+    static let tabHeight: CGFloat = 18
+    private static let tabWidth: CGFloat = 52
+    private static let panelWidth: CGFloat = 300
+
+    /// Computed rather than a `static let` (as the plain rounded rect was),
+    /// because the silhouette now tracks the quick-settings panel's state.
+    private var barShape: BarPedestalShape {
+        BarPedestalShape(
+            topWidth: showQuickSettings ? Self.panelWidth : Self.tabWidth,
+            topHeight: topBoxHeight
+        )
+    }
 
     private func floatingBar(current: Note) -> some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                if showQuickSettings {
+                    QuickSettingsPanel()
+                        .frame(width: Self.panelWidth)
+                        .transition(.opacity)
+                }
+                quickSettingsTab
+            }
+            .background {
+                GeometryReader { geo in
+                    Color.clear.preference(key: BarTopBoxHeightKey.self, value: geo.size.height)
+                }
+            }
+            barContent(current: current)
+                // Stays on the *bar's* top edge. Hung off the whole container it
+                // would pin itself to the top of the tab instead, floating above
+                // the bar it is reporting on.
+                .overlay(alignment: .top) { chunkingProgressStrip }
+        }
+        .onPreferenceChange(BarTopBoxHeightKey.self) { topBoxHeight = $0 }
+        .clipShape(barShape)
+        .floatingChrome(in: barShape)
+        .padding(.bottom, 14)
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showQuickSettings)
+        .animation(.easeInOut(duration: 0.18), value: player.playingNoteId == noteId)
+        .animation(.easeInOut(duration: 0.2), value: generator.transcriptionProgress)
+    }
+
+    private func barContent(current: Note) -> some View {
         VStack(spacing: 8) {
             if player.playingNoteId == noteId {
                 scrubBar
@@ -254,12 +299,25 @@ struct NoteEditorView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
-        .overlay(alignment: .top) { chunkingProgressStrip }
-        .clipShape(Self.barShape)
-        .floatingChrome(in: Self.barShape)
-        .padding(.bottom, 14)
-        .animation(.easeInOut(duration: 0.18), value: player.playingNoteId == noteId)
-        .animation(.easeInOut(duration: 0.2), value: generator.transcriptionProgress)
+    }
+
+    /// The pull-tab. It sits between the panel and the bar, so the same control
+    /// is the handle when collapsed and the collapse affordance when open.
+    private var quickSettingsTab: some View {
+        Button {
+            showQuickSettings.toggle()
+        } label: {
+            Image(systemName: showQuickSettings ? "chevron.down" : "chevron.up")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 10, height: 10)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+                .frame(width: Self.tabWidth, height: Self.tabHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(showQuickSettings ? "Hide quick settings" : "Model and notes style")
     }
 
     /// Hairline fill along the top inner edge of the pill, in the active theme accent.

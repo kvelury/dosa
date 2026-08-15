@@ -60,9 +60,10 @@ Sources/Dosa/
     TranscriptView.swift Transcript sheet (read-only MarkdownTextEditor)
     SearchViews.swift    Global search sheet, in-note popover, filter chips
     SettingsView.swift   All settings sections + export/import
+    QuickSettingsPanel.swift  Model + Notes Style panel inside the recording bar's pull-tab
     WelcomeView.swift    Greeting, stats, shortcut hints
     DeletedNoteView.swift  Trash preview with restore/delete
-    SharedViews.swift    RecordingWaveformView, ErrorDialogView, MultiSelectionView
+    SharedViews.swift    FloatingChrome, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
   Branding.swift         DosaMark (baked PNGs) + DosaWatermark (Canvas rings for WelcomeView)
 Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
 Resources/Branding/     Source SVGs (app icon, in-app mark, menu-bar templates — see §2b)
@@ -384,11 +385,64 @@ Details that are load-bearing:
   (glass renders behind the content it wraps).
 - No `GlassEffectContainer`: it exists to blend and morph *adjacent* glass shapes, and these three
   are single isolated surfaces in different corners. Add one only if two glass shapes ever sit side
-  by side.
+  by side. The quick-settings panel (§9d) deliberately does not qualify — it is drawn as part of the
+  bar's own shape, not as a second surface.
 - Buttons inside the bar stay `.bordered` / `.borderedProminent`. Those pick up the 26 look
   automatically when recompiled, and glass-on-glass is explicitly against Apple's guidance.
 - Glass refracts what is behind it, so over the editor's flat background it reads as a subtle tint
   rather than the dramatic refraction in Apple's marketing. That is correct output, not a failure.
+
+> **KNOWN, UNFIXED — the pointer shows an I-beam over the floating overlays.** They sit above
+> `PaddedTextView`, and an `NSTextView` claims the I-beam across its whole visible area. Clicks
+> work; the pointer just reads as a text caret over the recording bar. Three layered-on-top fixes
+> were tried and all three lost, because the text view re-asserts its claim from inside its own
+> `resetCursorRects`: an arrow cursor rect on a view above it, an `.inVisibleRect`/`.cursorUpdate`
+> tracking area above it, and `pointerStyle(.default)` (macOS 15+). A subtractive fix — markers
+> registering the overlay frames, `PaddedTextView` carving them out of the rect it claims — was
+> built and reverted as more machinery than the cosmetic problem warranted. Don't retry the three
+> layered approaches. `.onHover` + `NSCursor.push()/pop()` is also a dead end: one dropped hover
+> leaves the cursor stack unbalanced and the pointer stuck.
+
+---
+
+## 9d. The recording bar's quick-settings tab (`BarPedestalShape`, `QuickSettingsPanel`)
+
+The two settings that get touched most — which model writes the notes, and how detailed they are —
+are reachable from the floating bar without opening Settings. A pull-tab sits centered on the bar's
+top edge; clicking it slides out a 300 pt panel holding a Model menu and the Notes Style slider.
+Because `floatingBar(current:)` is one view for every bar state, the tab looks and behaves the same
+idle, recording, and playing back.
+
+**The panel is not a second surface — it is part of the bar's silhouette.** `BarPedestalShape`
+(`SharedViews.swift`) is an `InsettableShape` drawing a wide plinth with a narrower box centered on
+top, joined by concave fillets: collapsed the box is a 52×18 half-oval tab, open it is the panel.
+`topWidth`/`topHeight` are its `animatableData`, so the tab *morphs* into the panel in one spring
+rather than a card fading in above the bar.
+
+Load-bearing details:
+
+- **One continuous outline, not two overlapping rounded rects.** Overlapping subpaths would union
+  fine under a non-zero fill, but `FloatingChrome`'s pre-26 branch calls `strokeBorder`, and a
+  stroke traces the submerged edges too — a hairline seam straight across the junction. A single
+  outline also gives Liquid Glass one unbroken edge to highlight, which is what sells the panel as
+  part of the bar. Built corner-by-corner with `Path.addArc(tangent1End:tangent2End:radius:)`; at
+  the two shoulders the interior angle is reflex, so the same call yields the concave flare.
+- `topHeight` is **measured**, not hard-coded — a `GeometryReader` background on the panel + tab
+  publishes `BarTopBoxHeightKey`, consumed into `@State topBoxHeight` (seeded at `tabHeight`, so
+  frame one is already the collapsed state). Hard-coding it would go stale under a longer model
+  name or a larger text size.
+- `barShape` is therefore **computed, not a `static let`** like `pillShape` still is — it tracks
+  view state now.
+- `chunkingProgressStrip` hangs off the bar's *content*, not the whole container. On the container
+  it would pin itself to the top of the tab, floating above the bar it reports on.
+- `topWidth` is clamped so both shoulders keep a straight run of bar top edge to flare onto
+  (`width - 2*(barCornerRadius + jointRadius)`); the narrowest real bar is ~430 pt against a 300 pt
+  panel, so this only matters in degenerate layouts. `topHeight <= 0` degrades to a plain rounded
+  rect — the bar exactly as it was before the tab existed.
+- `MarkdownTextEditor`'s `bottomContentInset` went 74 → 88 for the tab's permanent 18 pt. The open
+  panel is transient and reserves nothing.
+- `NotesStyleSlider` is shared verbatim with Settings (§11) rather than reimplemented, so the two
+  are literally the same control.
 
 ---
 
@@ -442,6 +496,13 @@ Per-note sync toggle (data-source destinations only); push = debounced `replace_
 
 Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Notion** (§10) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
 
+- **Model and Notes Style are also reachable from the recording bar's quick-settings tab** (§9d),
+  which writes the same UserDefaults keys through `@AppStorage` — the two views stay in lockstep in
+  both directions, and `NotesStyleSlider` is one shared view. The bar's Model menu is a **superset**
+  across `configuredProviders`, so picking a model there moves `llmProvider` with it via
+  `AppSettings.selectModel(_:provider:)` — a model choice that didn't also select its provider would
+  be stored and never used. `AppSettings.availableModels(for:)` / `modelStorageKey(for:)` are the
+  single provider-keyed lookups both views go through.
 - **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models.
 - Closing Settings bumps `themeRefreshTick` (§8).
 
