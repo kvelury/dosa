@@ -146,6 +146,8 @@ final class GenerationManager: ObservableObject {
             markdown = Self.normalizeBullets(markdown)
             if var fresh = store.note(id: noteId) {
                 fresh.enhancedMarkdown = markdown
+                fresh.generationModel = providerModel
+                fresh.generationStyle = AppSettings.verbosityLevelNames[AppSettings.currentVerbosity]
                 store.update(fresh)
             }
         } catch {

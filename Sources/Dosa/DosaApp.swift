@@ -39,6 +39,9 @@ final class AppState: ObservableObject {
         selectedNoteIds.count == 1 ? selectedNoteIds.first : nil
     }
     @Published var showGlobalSearch = false
+    /// Lives here rather than in ContentView so the ⌘, menu command can open
+    /// Settings too — same reason as showGlobalSearch above.
+    @Published var showSettings = false
     /// Bumped to a fresh UUID each time Cmd+F fires; the open note editor consumes it.
     @Published var noteSearchRequest: UUID?
     /// Work that should begin as soon as a note's editor appears. The editor is rebuilt
@@ -86,6 +89,14 @@ struct DosaApp: App {
                     appState.selectedNoteIds = [note.id]
                 }
                 .keyboardShortcut("o", modifiers: .command)
+            }
+            // Settings is a sheet, not a Settings scene, so the standard app-menu
+            // slot has to be filled by hand — otherwise ⌘, is dead.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    appState.showSettings = true
+                }
+                .keyboardShortcut(",", modifiers: .command)
             }
             CommandGroup(replacing: .saveItem) {
                 Button("Close Note") {

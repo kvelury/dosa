@@ -4,7 +4,6 @@ struct ContentView: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var recorder: AudioRecorder
-    @State private var showSettings = false
     @State private var interruptionMessage: String?
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
@@ -30,7 +29,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selectedNoteIds: $appState.selectedNoteIds, showSettings: $showSettings)
+            SidebarView(selectedNoteIds: $appState.selectedNoteIds)
                 .navigationSplitViewColumnWidth(min: 230, ideal: 270, max: 380)
         } detail: {
             Group {
@@ -49,7 +48,7 @@ struct ContentView: View {
                 }
             }
             .id(appState.themeRefreshTick)
-            .modifier(SetupBannerInset(onOpenSettings: { showSettings = true }))
+            .modifier(SetupBannerInset(onOpenSettings: { appState.showSettings = true }))
             // Hides the toolbar's material/separator, not the toolbar itself, so
             // the theme fill below paints edge-to-edge under that region while
             // the toolbar keeps its items. See §9b of the design doc.
@@ -59,7 +58,7 @@ struct ContentView: View {
             .toolbarBackground(.hidden, for: .windowToolbar)
             .background(Theme.current.editorBackgroundColor.ignoresSafeArea(edges: .top))
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $appState.showSettings) {
             SettingsView()
         }
         .sheet(isPresented: $appState.showGlobalSearch) {

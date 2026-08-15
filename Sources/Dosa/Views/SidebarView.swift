@@ -5,7 +5,6 @@ struct SidebarView: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var appState: AppState
     @Binding var selectedNoteIds: Set<UUID>
-    @Binding var showSettings: Bool
 
     @State private var newFolderParentId: UUID?
     @State private var newFolderName = ""
@@ -13,25 +12,6 @@ struct SidebarView: View {
     @State private var confirmEmptyTrash = false
     @State private var pendingDeleteIds: Set<UUID> = []
     @State private var deletedNotesExpanded = false
-
-    @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
-    @AppStorage(AppSettings.modelKey) private var geminiModel = AppSettings.defaultModel
-    @AppStorage(AppSettings.deepseekModelKey) private var deepseekModel = AppSettings.defaultDeepSeekModel
-    @AppStorage(AppSettings.anthropicModelKey) private var anthropicModel = AppSettings.defaultAnthropicModel
-
-    /// The model the default provider will actually use, for the footer line.
-    /// Reads the @AppStorage values rather than AppSettings so the line
-    /// refreshes as soon as the model picker changes.
-    private var activeModelName: String {
-        guard AppSettings.supportedProviders.contains(llmProvider) else {
-            return AppSettings.resolveModel(geminiModel)
-        }
-        switch llmProvider {
-        case "Anthropic": return AppSettings.resolveAnthropicModel(anthropicModel)
-        case "DeepSeek": return AppSettings.resolveDeepSeekModel(deepseekModel)
-        default: return AppSettings.resolveModel(geminiModel)
-        }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -89,15 +69,17 @@ struct SidebarView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 14)
             .padding(.top, 34)
-            .padding(.bottom, 8)
+            // Enough of a gap that the "Notes" section header reads as the top of
+            // the list rather than a caption under the toolbar buttons.
+            .padding(.bottom, 20)
 
             notesList
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
                 Button {
-                    showSettings = true
+                    appState.showSettings = true
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "gearshape")
@@ -109,15 +91,15 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)
                 .help("LLM provider API key, prompts, and app options")
-                (Text("v\(Self.appVersion)")
-                    + Text("  ·  ")
-                    + Text(activeModelName).italic())
+                // minLength keeps the version off the label at the sidebar's
+                // 230pt minimum width.
+                Spacer(minLength: 8)
+                Text("v\(Self.appVersion)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 14)
-            .padding(.top, 20)
-            .padding(.bottom, 10)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .alert("New Folder", isPresented: $showNewFolderAlert) {

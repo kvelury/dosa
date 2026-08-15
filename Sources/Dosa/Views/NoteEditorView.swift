@@ -188,17 +188,29 @@ struct NoteEditorView: View {
     private func content(note: Binding<Note>, current: Note) -> some View {
         if viewMode == .aiNotes, current.enhancedMarkdown != nil {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 14) {
-                    Label("Your notes", systemImage: "circle.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.primary)
-                    Label("Dosa additions", systemImage: "circle.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DiffEngine.aiColor)
-                    Spacer()
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 14) {
+                        Label("Your notes", systemImage: "circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.primary)
+                        Label("Dosa additions", systemImage: "circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(DiffEngine.aiColor)
+                        Spacer()
+                    }
+                    if let model = current.generationModel, let style = current.generationStyle {
+                        // Concatenated so the separator stays upright — italicizing
+                        // a bar just makes it look like a stray slash.
+                        (Text(model.lowercased()).italic()
+                            + Text(" | ")
+                            + Text("style: \(style)".lowercased()).italic())
+                            .font(.system(size: 13))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 .padding(.horizontal, 20)
-                .padding(.vertical, 7)
+                .padding(.top, 7)
+                .padding(.bottom, current.generationModel != nil ? 12 : 7)
                 MarkdownTextEditor(
                     text: enhancedBinding(note: note),
                     diffAgainst: current.manualText,
