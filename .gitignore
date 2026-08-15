@@ -1,0 +1,6 @@
+# Finder metadata
+.DS_Store
+
+# SwiftPM's build directory. Note that build/ is *not* ignored — the assembled
+# build/Dosa.app bundle is tracked on purpose (see docs/TECHNICAL_DESIGN.md).
+/.build/
