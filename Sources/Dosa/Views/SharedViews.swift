@@ -105,24 +105,29 @@ private func setupBannerMessage(
     }
 }
 
-/// Chrome for the overlays that float above the editor — the recording bar, the
-/// actions pill, the toast. macOS 26 draws them in Liquid Glass; earlier releases
-/// keep the material + hairline + shadow recipe those overlays shipped with.
+/// Chrome for the overlays that float above the editor — the recording bar and the
+/// toast. macOS 26 draws them in Liquid Glass; earlier releases keep the material +
+/// hairline + shadow recipe those overlays shipped with.
+///
+/// Only for glass the app draws *over content*. Toolbar items get the system's own
+/// Liquid Glass and must not be given this as well — see §9c.
 ///
 /// `canImport(FoundationModels)` is how the app probes for a macOS 26 SDK at
 /// compile time, same as `AppleTranscriber.advancedAvailable`, so a binary built
 /// against an older SDK still compiles and takes the fallback.
 struct FloatingChrome<S: InsettableShape>: ViewModifier {
     let shape: S
-    /// Glass that responds to hover and press. Right for a control that is itself
-    /// one button, wrong for a container that holds its own controls.
-    var interactive: Bool = false
 
     @ViewBuilder
     func body(content: Content) -> some View {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
-            content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+            // Never `.interactive()`. That is for glass which is itself one
+            // button; both surfaces left here are containers holding their own
+            // controls, and it would light the whole thing up whenever the
+            // pointer neared any of them. The one control that did want it —
+            // the ⋯ pill — is a toolbar item now and gets the system's.
+            content.glassEffect(.regular, in: shape)
         } else {
             material(content)
         }
@@ -140,8 +145,139 @@ struct FloatingChrome<S: InsettableShape>: ViewModifier {
 }
 
 extension View {
-    func floatingChrome<S: InsettableShape>(in shape: S, interactive: Bool = false) -> some View {
-        modifier(FloatingChrome(shape: shape, interactive: interactive))
+    func floatingChrome<S: InsettableShape>(in shape: S) -> some View {
+        modifier(FloatingChrome(shape: shape))
+    }
+}
+
+/// The back arrow in the toolbar's leading region that returns the detail pane to
+/// Welcome — the same thing ⌘W "Close Note" does. Deselecting is already what ⌘W
+/// and a click on empty sidebar space do; neither is discoverable from inside an
+/// open note.
+///
+/// It is a `ToolbarItem`, not an overlay, because both places it has to appear —
+/// beside the floating sidebar toggle when the sidebar is collapsed, at the detail
+/// column's leading edge when it is open — are in the titlebar strip, and the app
+/// deliberately cannot tell those two states apart (§9b bans a `columnVisibility`
+/// binding and `check-window-chrome.sh` enforces it). The toolbar tracks the split
+/// for us, which is the whole reason this works. See §9b.
+///
+/// No `floatingChrome` and no `buttonStyle`: macOS 26 gives toolbar items their own
+/// Liquid Glass background — the sidebar toggle's pill *is* that treatment — so
+/// drawing our own would be glass-on-glass (§9c). The `ToolbarSpacer` is only there
+/// to keep the two from being absorbed into one segmented capsule.
+///
+/// The availability check has to sit out here in the `ViewBuilder` rather than
+/// inside the `.toolbar { }` closure: `ToolbarContentBuilder.buildLimitedAvailability`
+/// is itself macOS 14.5+, and `Package.swift` targets 14.0, so an `if #available`
+/// *inside* the toolbar closure resolves to the obsoleted overload — the one whose
+/// message is "this code may crash on earlier versions of the OS". `ViewBuilder`'s
+/// equivalent has no such floor.
+struct BackToWelcomeToolbar: ViewModifier {
+    let isVisible: Bool
+    /// Passed in rather than read from `Theme.current` inside, so a theme change
+    /// is an actual value change on this modifier. The toolbar is applied after
+    /// `ContentView`'s `.id(themeRefreshTick)`, deliberately — re-keying it would
+    /// tear the item out of the NSToolbar and put it back on every refresh — so
+    /// it does not get the id-based redraw the rest of the detail pane gets.
+    let tint: Color
+    let action: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            content.toolbar {
+                if isVisible {
+                    // A fixed spacer is a break between Liquid Glass groups, so
+                    // this reads as its own pill beside the toggle instead of a
+                    // second compartment welded onto it.
+                    ToolbarSpacer(.fixed, placement: .navigation)
+                    ToolbarItem(placement: .navigation) { button }
+                }
+            }
+        } else {
+            plain(content)
+        }
+        #else
+        plain(content)
+        #endif
+    }
+
+    private func plain(_ content: Content) -> some View {
+        content.toolbar {
+            if isVisible {
+                ToolbarItem(placement: .navigation) { button }
+            }
+        }
+    }
+
+    /// No font, frame, or image scale: the toolbar's own control metrics are what
+    /// match this to the system sidebar toggle, and overriding them is exactly
+    /// what would break the match. Color is the one exception — the glyph takes
+    /// the theme accent, set explicitly because `ContentView`'s `.tint` does not
+    /// reach the window toolbar (it hosts items outside the content hierarchy).
+    private var button: some View {
+        Button(action: action) {
+            Label("Back to home", systemImage: "chevron.backward")
+        }
+        .labelStyle(.iconOnly)
+        .foregroundStyle(tint)
+        .help("Back to home (⌘W)")
+    }
+}
+
+extension View {
+    func backToWelcomeToolbar(isVisible: Bool, tint: Color, action: @escaping () -> Void) -> some View {
+        modifier(BackToWelcomeToolbar(isVisible: isVisible, tint: tint, action: action))
+    }
+}
+
+/// Puts one control at the **trailing** end of the window toolbar.
+///
+/// `.primaryAction` alone does not do this. In a `NavigationSplitView` detail
+/// column the items pack against the *leading* edge of the detail's toolbar
+/// section — which put the ⋯ menu immediately beside the back arrow — because
+/// nothing pushes them outward. A flexible spacer is what sends it to the far
+/// side, and it has to be a toolbar spacer: padding or an offset on the item
+/// resizes or shifts the contents of its glass pill instead of moving the pill.
+///
+/// Same availability hoist as `BackToWelcomeToolbar`, for the same reason: the
+/// branch cannot live inside the `.toolbar { }` closure.
+struct TrailingToolbarItem<Item: View>: ViewModifier {
+    let item: () -> Item
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            content.toolbar {
+                ToolbarSpacer(.flexible, placement: .primaryAction)
+                ToolbarItem(placement: .primaryAction) { item() }
+            }
+        } else {
+            spacedGroup(content)
+        }
+        #else
+        spacedGroup(content)
+        #endif
+    }
+
+    /// Pre-26 has no `ToolbarSpacer`, but a `Spacer` inside a `ToolbarItemGroup`
+    /// expands the same way.
+    private func spacedGroup(_ content: Content) -> some View {
+        content.toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Spacer()
+                item()
+            }
+        }
+    }
+}
+
+extension View {
+    func trailingToolbarItem<Item: View>(@ViewBuilder _ item: @escaping () -> Item) -> some View {
+        modifier(TrailingToolbarItem(item: item))
     }
 }
 

@@ -63,7 +63,7 @@ Sources/Dosa/
     QuickSettingsPanel.swift  Model + Notes Style panel inside the recording bar's pull-tab
     WelcomeView.swift    Greeting, stats, shortcut hints
     DeletedNoteView.swift  Trash preview with restore/delete
-    SharedViews.swift    FloatingChrome, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
+    SharedViews.swift    FloatingChrome, BackToWelcomeToolbar, TrailingToolbarItem, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
   Branding.swift         DosaMark (baked PNGs) + DosaWatermark (Canvas rings for WelcomeView)
 Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
 Resources/Branding/     Source SVGs (app icon, in-app mark, menu-bar templates — see §2b)
@@ -83,7 +83,7 @@ The mark is brand-fixed brown/amber (`#7A4512` / `#E0A44E`) regardless of which 
 
 **Not yet wired up**: `dosa-menubarTemplate.svg` / `dosa-menubarRecordingTemplate.svg` — flat-black idle/recording icons sized for an `NSStatusItem`/`MenuBarExtra`, which Dosa doesn't have. `dosa-mark-cream.svg` (a lighter alternate mark, e.g. for a dark solid-color hero) and `dosa-mark-adaptive.svg` (the CSS self-adapting version — kept as reference for the intended color pairing, not for rendering) are also unused. All are preserved in `Resources/Branding/` for whenever those features exist.
 
-**Window chrome**: `.windowStyle(.hiddenTitleBar)` — no title bar; traffic lights overlay the sidebar's top-left, which is why the sidebar's icon row has `.padding(.top, 34)`. The sidebar-toggle is a single overlay button immediately to the right of those lights (not a toolbar item — those duplicate and miss the lights). Do not mutate the `NSWindow` to "finish" this look — see §9b.
+**Window chrome**: `.windowStyle(.hiddenTitleBar)` — no title bar; traffic lights overlay the sidebar's top-left, which is why the sidebar's icon row has `.padding(.top, 34)`. The sidebar toggle is `NavigationSplitView`'s own, left where macOS puts it; the only thing the app adds to that region is the back-to-home arrow (`BackToHomeToolbarItem`). Do not mutate the `NSWindow` to "finish" this look — see §9b.
 
 ---
 
@@ -284,7 +284,7 @@ Full-document restyle on every change (cheap at note scale). Per line: headings 
 - `Theme.swift`: `ThemePalette` tokens — `accent`, `highlight`, `highlightDeep` (welcome-glyph gradient bottom), `editorBackground`, `cardFill`, `codeSpan`, `defaultDosaColorName` — every token a dynamic `NSColor(name:nil){appearance…}` with light/dark variants. Five presets: **Classic** (blue/orange/system), **Crepe** (espresso/caramel/cream — deliberately hue-separated from Masala), **Masala** (red-orange/saffron), **Chutney** (greens/mint), **Slate** (graphite/steel).
 - Overrides on top of any preset: **Accent Override** (Blue/Purple/Pink/Green/Graphite — red excluded deliberately; it means destructive/record) and **Dosa Notes Color** (Grey/Purple/Red/Dark Blue/Dark Green + "Theme Default" which follows the preset; stored value "Theme Default" or unset ⇒ preset default via `AppSettings.currentDosaColorName`).
 - Application: root `.tint(Theme.current.accentColor)` in ContentView (covers selection, sliders, pickers, chips, links); explicit `Theme.current.*` reads for play button, backgrounds, stat cards, key-cap chips, markdown bullet/code colors, search-match highlight, welcome gradient.
-- **Not themeable by design**: body text (system label colors), destructive red, the floating overlays' translucent chrome (floating bar / ⋯ pill / toasts — see `FloatingChrome` in §9c), sidebar material.
+- **Not themeable by design**: body text (system label colors), destructive red, the floating overlays' translucent chrome (floating bar / toasts — see `FloatingChrome` in §9c), the titlebar row's glass pills (their *glyphs* can be tinted — the back arrow is — but the pills themselves are the system's), sidebar material.
 - **Refresh model**: views re-render via `@AppStorage` observation of the theme keys, editors re-style via `Theme.styleFingerprint` comparison, and — the sledgehammer that guarantees "everything at once" — closing Settings bumps `AppState.themeRefreshTick`, and ContentView has `.id(appState.themeRefreshTick)` on the NavigationSplitView, rebuilding the whole tree. Side effect: sidebar disclosure state resets after Settings closes. `AppSettings.applyAppearance()` maps the Appearance picker (auto/light/dark) to `NSApp.appearance`, applied on change and at launch.
 
 ---
@@ -333,7 +333,8 @@ The last round of this produced a toggle floating in the vertical middle of the 
 **Invariants that must hold after any UI change:**
 
 1. Traffic lights visible at the top-left of the window.
-2. Exactly one sidebar toggle, the system's, in the window toolbar. No second toggle, no hand-positioned one.
+2. Exactly one sidebar toggle, the system's, in the window toolbar. No second toggle, no hand-positioned one. The app contributes exactly one item of its own to that region — the back-to-Welcome arrow below — which is a *navigation* item, not a toggle; this invariant is about toggles.
+2b. The back arrow is present iff the detail pane is showing something other than Welcome, in both sidebar states, and never overlaps the toggle or the traffic lights.
 3. Sidebar fills the full window height and draws under the traffic lights; its `.padding(.top, 34)` clears them, with no separate blank strip above the folder/search/+ row.
 4. Setup banner appears at the top of the detail pane when the user's name or the default provider's API key is missing; an empty banner must not reserve a strip (`SetupBannerInset` only insets when it has a message).
 5. Welcome and the note editor both render correctly in light and dark, and across theme presets.
@@ -347,6 +348,13 @@ The last round of this produced a toggle floating in the vertical middle of the 
 - Add a `ToolbarItem` sidebar toggle, or drive `columnVisibility` by hand, to "reposition" the system toggle.
 - Put window styling anywhere except `.windowStyle(...)` on the `Scene`.
 
+**The back-to-Welcome arrow is the one sanctioned way to put a button up there.** `BackToWelcomeToolbar` (`SharedViews.swift`) adds a `ToolbarItem(placement: .navigation)` to the detail column, applied in `ContentView`. This is not an exception to the overlay ban above — it is the alternative to it, and the reason the ban can stay absolute:
+
+- The arrow has to sit beside the sidebar toggle when the sidebar is collapsed and at the detail column's leading edge when it is open. Those are different x positions, and **the app cannot tell the two states apart** — the `columnVisibility` binding that would reveal it is build-blocked. The toolbar tracks the split for us, so no geometry is written by hand and nothing drifts.
+- It is a visible affordance for something the app already did invisibly: `appState.selectedNoteIds = []`, the same action as ⌘W "Close Note" (`DosaApp.swift`) and a click on empty sidebar space (`SidebarDeselectCatcher`).
+- **One action, two entry points, one key equivalent.** The button carries no `.keyboardShortcut` — ⌘W belongs to the `CommandGroup`, and a second responder for it in the same window would be a duplicate whose availability flickered as the button came and went.
+- Visibility mirrors `body`'s branches (`isShowingDetail`), not `selectedNoteIds.isEmpty`: a selected id whose note no longer resolves falls through to Welcome, and an arrow floating over the home screen is the one wrong state reachable here.
+
 **Do:** for edge-to-edge content in the detail pane, `.toolbarBackground(.hidden, for: .windowToolbar)` + `.background(...).ignoresSafeArea(edges: .top)` — the two lines above. If a view sits too high or too low, adjust *that view's* padding, and keep it inside normal layout flow (a top-anchored `VStack`/overlay reaching into the titlebar region is how the Welcome greeting ended up jammed against the window edge) — never touch the window.
 
 **Enforcement:** `Scripts/check-window-chrome.sh` fails the build on every forbidden API above; `build.sh` runs it before compiling. If it fires, the fix is to delete the offending call, not to add an exception.
@@ -357,10 +365,13 @@ The last round of this produced a toggle floating in the vertical middle of the 
 
 ## 9c. Floating overlay chrome (Liquid Glass, with a pre-26 fallback)
 
-Three overlays float above the editor and share one look: the recording bar (bottom), the ⋯ actions
-pill (top-trailing), and the toast (top). `FloatingChrome` in `SharedViews.swift` is that look, and
-it is the only place the decision is made — `.floatingChrome(in: shape, interactive:)` at the three
-call sites in `NoteEditorView.swift`.
+Two overlays float above the editor and share one look: the recording bar (bottom) and the toast
+(top). `FloatingChrome` in `SharedViews.swift` is that look, and it is the only place the decision is
+made — `.floatingChrome(in: shape)` at the two call sites in `NoteEditorView.swift`.
+
+(The ⋯ actions menu used to be a third, a floating pill in the top-trailing corner. It is a
+`ToolbarItem(placement: .primaryAction)` now, so that it sits on the same line as the sidebar toggle
+and the back arrow instead of below them — see the toolbar-glass rule further down.)
 
 - **macOS 26+**: `.glassEffect(.regular, in: shape)` — real Liquid Glass, which brings its own edge
   highlight, shadow, and the automatic Reduce Transparency / Increase Contrast handling, so the
@@ -376,24 +387,45 @@ since `Package.swift` still targets macOS 14.
 
 Details that are load-bearing:
 
-- `interactive: true` **only** for the ⋯ pill. `Glass.interactive()` is for a control that is itself
-  one button; on a container holding its own controls it would light the whole surface up when the
-  pointer approaches any control inside it.
+- **Never `.interactive()`.** `Glass.interactive()` is for glass that is itself one button; on a
+  container holding its own controls it lights the whole surface up when the pointer approaches any
+  control inside it, and both surfaces left here are containers. `FloatingChrome` therefore takes no
+  `interactive:` parameter — the one control that wanted it, the ⋯ pill, is a toolbar item now and
+  gets the system's interactive glass for free.
 - Glass is applied **last**, after padding and `clipShape`, per Apple's "apply `glassEffect` after
   other modifiers that affect appearance." In the recording bar the `clipShape` sits above the
   chrome so the transcription progress hairline is clipped as content and stays *above* the glass
   (glass renders behind the content it wraps).
-- No `GlassEffectContainer`: it exists to blend and morph *adjacent* glass shapes, and these three
-  are single isolated surfaces in different corners. Add one only if two glass shapes ever sit side
-  by side. The quick-settings panel (§9d) deliberately does not qualify — it is drawn as part of the
-  bar's own shape, not as a second surface.
+- No `GlassEffectContainer`: it exists to blend and morph *adjacent* glass shapes, and these two are
+  single isolated surfaces in different corners. Add one only if two glass shapes ever sit side by
+  side. The quick-settings panel (§9d) deliberately does not qualify — it is drawn as part of the
+  bar's own shape, not as a second surface; the titlebar row does not either, because those are
+  toolbar items and the system already groups them (see `ToolbarSpacer` below).
 - Buttons inside the bar stay `.bordered` / `.borderedProminent`. Those pick up the 26 look
   automatically when recompiled, and glass-on-glass is explicitly against Apple's guidance.
 - Glass refracts what is behind it, so over the editor's flat background it reads as a subtle tint
   rather than the dramatic refraction in Apple's marketing. That is correct output, not a failure.
 
-> **KNOWN, UNFIXED — the pointer shows an I-beam over the floating overlays.** They sit above
-> `PaddedTextView`, and an `NSTextView` claims the I-beam across its whole visible area. Clicks
+**The titlebar row is glass the app does not draw itself.** Three controls share that line — the system sidebar toggle, the back arrow (`.navigation`, §9b), and the ⋯ actions menu (`.primaryAction`, declared on `NoteEditorView` because it needs the open note). On macOS 26 the system wraps toolbar items in Liquid Glass; the sidebar toggle's pill *is* that treatment, not a bespoke one, and the other two get the identical pill for free.
+
+So none of them carries `floatingChrome` or a `buttonStyle`, and none sets a font, frame, or `imageScale`. **Color is the one property worth setting**: both app-owned glyphs — the back arrow and the ⋯ — take `Theme.current.accentColor`, because `ContentView`'s `.tint` does not reach the window toolbar; it hosts its items outside the content hierarchy. (The sidebar toggle is the system's and stays system-colored; that asymmetry is unavoidable.)
+
+They get there differently, and the difference is load-bearing. The ⋯ reads `Theme.current` inline, like the rest of `NoteEditorView`, because it sits inside the `.id(themeRefreshTick)` group and is rebuilt outright on a theme change. The back arrow's toolbar is applied *after* that `.id` on purpose — re-keying it would rip the item out of the NSToolbar and re-add it on every refresh — so it never gets that redraw, and its tint is **passed into** `BackToWelcomeToolbar` instead, making a theme change a real value change on the modifier. **The toolbar's own control metrics are what put all three on one line at one size**; overriding any of them is exactly what breaks the row. The ⋯ pill's previous incarnation is the cautionary tale — as a floating overlay it had to fight the menu's metrics with `resizable().frame(...)` on each glyph to get a usable size, and it still sat below the titlebar rather than in it. Moving it into the toolbar deleted all of that.
+
+`FloatingChrome` is for overlays *over content* only; using it on a toolbar item is glass-on-glass, the same rule as "buttons inside the recording bar stay `.bordered`".
+
+Spacers do two different jobs here, and both are load-bearing:
+
+- `ToolbarSpacer(.fixed, placement: .navigation)` **breaks a glass group.** Adjacent same-placement items are wrapped in one glass container with hairline dividers, which would weld the back arrow onto the sidebar toggle as a segmented control.
+- `ToolbarSpacer(.flexible, placement: .primaryAction)` **pushes the ⋯ menu to the trailing edge.** `.primaryAction` on its own does *not* mean "far right": in a `NavigationSplitView` detail column the items pack against the leading edge of the detail's toolbar section, and the ⋯ shipped for one build sitting immediately beside the back arrow because of it. `TrailingToolbarItem` in `SharedViews.swift` is that spacer plus the item.
+
+Do not reach for `.padding` or `.offset` to reposition a toolbar item — SwiftUI exposes no trailing inset, and both of those resize or shift the *contents* of the glass pill rather than moving the pill.
+
+> **CALLOUT — never write `if #available` inside a `@ToolbarContentBuilder` closure while the deployment target is below macOS 14.5.** `ToolbarContentBuilder.buildLimitedAvailability` has two overloads; the usable one is `@available(macOS 14.5, *)`, and `Package.swift` targets 14.0, so the compiler silently selects the other — `obsoleted: 14.5`, message "this code may crash on earlier versions of the OS" — whose body performs no type erasure at all. Hoist the check up to the `ViewBuilder` level instead (`ViewBuilder`'s equivalent is unconstrained), which is why `BackToWelcomeToolbar` is a `ViewModifier` that applies two whole different `.toolbar { }` blocks rather than one block with a branch inside. A `buildLimitedAvailability` deprecation warning in the build output means this slipped back in; hoist it, never silence it.
+
+> **KNOWN, UNFIXED — the pointer shows an I-beam over the recording bar and the toast.** They sit
+> above `PaddedTextView`, and an `NSTextView` claims the I-beam across its whole visible area. (The
+> ⋯ menu no longer has this: as a toolbar item it is not over the text view at all.) Clicks
 > work; the pointer just reads as a text caret over the recording bar. Three layered-on-top fixes
 > were tried and all three lost, because the text view re-asserts its claim from inside its own
 > `resetCursorRects`: an arrow cursor rect on a view above it, an `.inVisibleRect`/`.cursorUpdate`
@@ -553,6 +585,7 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 
 1. `./build.sh && open build/Dosa.app` — app launches, welcome shows stats + shortcut hints.
 1b. Window chrome intact: traffic lights at top-left, exactly one (system) sidebar toggle in the toolbar, sidebar full-height with no dead strip above its header. Collapse and reopen the sidebar. Welcome watermark + greeting with no white strip at the top of the detail pane.
+1c. Titlebar row: sidebar toggle, back arrow, and ⋯ menu all on one horizontal line at the same size. Back arrow absent on Welcome; present once a note (or a deleted note, or a multi-selection) is open, in both sidebar states; clicking it returns to Welcome. ⌘W still does the same thing, and File shows "Close Note" once. Every ⋯ menu item still works (exports, Notion, import, re-transcribe, discard, delete).
 2. Record (mic + play a video) → waveform bounces → stop → play with scrub bar.
 2b. Import: drag an `.mp4` onto a note, and repeat via ⌘O / sidebar `+` / ⋯ menu → play button with the right duration → Generate produces a transcript. Import onto a note that already has audio → prompt appears; "Import into a New Note" leaves the original untouched; after "Replace It" the previous `.m4a` is still in `Recordings/` under its old timestamped name.
 3. Generate Notes → sidebar row spinner → Dosa Notes tab with diff colors → Re-generate label; Stop mid-run cancels silently.
