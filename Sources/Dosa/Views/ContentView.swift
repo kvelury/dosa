@@ -40,9 +40,12 @@ struct ContentView: View {
                 }
             }
             .id(appState.themeRefreshTick)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                SetupBanner(onOpenSettings: { showSettings = true })
-            }
+            .modifier(SetupBannerInset(onOpenSettings: { showSettings = true }))
+            // Hides the toolbar's material/separator, not the toolbar itself, so
+            // the theme fill below paints edge-to-edge under that region while
+            // the toolbar keeps its items. See §9b of the design doc.
+            .toolbarBackground(.hidden, for: .windowToolbar)
+            .background(Theme.current.editorBackgroundColor.ignoresSafeArea(edges: .top))
         }
         .sheet(isPresented: $showSettings) {
             SettingsView()

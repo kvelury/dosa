@@ -1,0 +1,53 @@
+---
+description: Window chrome invariants for Dosa's SwiftUI views (titlebar, traffic lights, sidebar toggle)
+globs: Sources/Dosa/**/*.swift
+alwaysApply: false
+---
+
+# Window chrome is off-limits
+
+Dosa uses `.windowStyle(.hiddenTitleBar)` on the `WindowGroup` in `DosaApp.swift`. That is the
+**only** window-styling call in the codebase. Traffic lights overlay the sidebar's top-left, which
+is why `SidebarView`'s icon row has `.padding(.top, 34)`.
+
+`Scripts/check-window-chrome.sh` runs at the start of `./build.sh` and fails the build on
+everything below. If it fires, delete the offending call — do not loosen the check.
+
+## Never
+
+```swift
+.toolbar(.hidden, for: .windowToolbar)        // kills the sidebar toggle + traffic lights
+.toolbar(removing: .sidebarToggle)            // leaves no way to reopen a collapsed sidebar
+.toolbar(removing: .title)                    // same class of chrome collapse
+NavigationSplitView(columnVisibility: $x)     // let the split view own its visibility
+window.standardWindowButton(.zoomButton)      // wrong coordinate space; see below
+window.styleMask / .titleVisibility / .titlebarAppearsTransparent   // fights SwiftUI
+```
+
+Do not add a `ToolbarItem` sidebar toggle or an overlay button to "reposition" the system one.
+The traffic lights live in the window's titlebar view, a **sibling** of SwiftUI's content view, so
+any hand-placed button is measured in the wrong space and drifts with window size, sidebar width,
+and macOS version. The last attempt put the toggle in the vertical middle of the sidebar.
+
+The system toggle sitting near the split rather than beside the traffic lights is standard macOS
+placement (Notes, Mail). It is not a bug.
+
+## Instead
+
+For edge-to-edge content in the detail pane, the sanctioned pair (already in `ContentView`):
+
+```swift
+.toolbarBackground(.hidden, for: .windowToolbar)   // hides the material, keeps the toolbar
+.background(Theme.current.editorBackgroundColor.ignoresSafeArea(edges: .top))
+```
+
+If a view sits too high or too low, adjust **that view's** padding and keep it in normal layout
+flow. A top-anchored `VStack` or `.overlay(alignment: .top)` reaching into the titlebar region is
+how the Welcome greeting ended up jammed against the window edge.
+
+## Verify
+
+Any UI-touching change: `./build.sh`, quit the running app, `open build/Dosa.app`, then confirm
+traffic lights top-left, exactly one sidebar toggle, sidebar full-height with no dead strip above
+its header, and Welcome + editor correct in light and dark. Full invariant list: §9b of
+`docs/TECHNICAL_DESIGN.md`.

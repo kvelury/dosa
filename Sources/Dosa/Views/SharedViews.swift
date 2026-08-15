@@ -11,32 +11,14 @@ struct SetupBanner: View {
     @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
     let onOpenSettings: () -> Void
 
-    private var missingName: Bool {
-        userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var missingAPIKey: Bool {
-        let provider = AppSettings.supportedProviders.contains(llmProvider) ? llmProvider : "Gemini"
-        let providerKey: String
-        switch provider {
-        case "Anthropic": providerKey = anthropicAPIKey
-        case "DeepSeek": providerKey = deepseekAPIKey
-        default: providerKey = apiKey
-        }
-        return providerKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     private var message: String? {
-        switch (missingName, missingAPIKey) {
-        case (true, true):
-            return "Finish setting up Dosa — add your name and an LLM provider API key in Settings."
-        case (true, false):
-            return "Add your name in Settings so Dosa can label your voice correctly."
-        case (false, true):
-            return "Add an LLM provider API key in Settings to enable transcription and note generation."
-        case (false, false):
-            return nil
-        }
+        setupBannerMessage(
+            userName: userName,
+            apiKey: apiKey,
+            deepseekAPIKey: deepseekAPIKey,
+            anthropicAPIKey: anthropicAPIKey,
+            llmProvider: llmProvider
+        )
     }
 
     var body: some View {
@@ -60,6 +42,66 @@ struct SetupBanner: View {
                 Divider()
             }
         }
+    }
+}
+
+/// Applies the setup banner as a top inset only when it has something to say.
+/// An empty `.safeAreaInset` still reserves a strip at the top of the detail
+/// pane on some macOS versions, which showed up as a white bar on Welcome.
+struct SetupBannerInset: ViewModifier {
+    let onOpenSettings: () -> Void
+    @AppStorage(AppSettings.userNameKey) private var userName = ""
+    @AppStorage(AppSettings.apiKeyKey) private var apiKey = ""
+    @AppStorage(AppSettings.deepseekAPIKeyKey) private var deepseekAPIKey = ""
+    @AppStorage(AppSettings.anthropicAPIKeyKey) private var anthropicAPIKey = ""
+    @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
+
+    private var needed: Bool {
+        setupBannerMessage(
+            userName: userName,
+            apiKey: apiKey,
+            deepseekAPIKey: deepseekAPIKey,
+            anthropicAPIKey: anthropicAPIKey,
+            llmProvider: llmProvider
+        ) != nil
+    }
+
+    func body(content: Content) -> some View {
+        if needed {
+            content.safeAreaInset(edge: .top, spacing: 0) {
+                SetupBanner(onOpenSettings: onOpenSettings)
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private func setupBannerMessage(
+    userName: String,
+    apiKey: String,
+    deepseekAPIKey: String,
+    anthropicAPIKey: String,
+    llmProvider: String
+) -> String? {
+    let missingName = userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let provider = AppSettings.supportedProviders.contains(llmProvider) ? llmProvider : "Gemini"
+    let providerKey: String
+    switch provider {
+    case "Anthropic": providerKey = anthropicAPIKey
+    case "DeepSeek": providerKey = deepseekAPIKey
+    default: providerKey = apiKey
+    }
+    let missingAPIKey = providerKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    switch (missingName, missingAPIKey) {
+    case (true, true):
+        return "Finish setting up Dosa — add your name and an LLM provider API key in Settings."
+    case (true, false):
+        return "Add your name in Settings so Dosa can label your voice correctly."
+    case (false, true):
+        return "Add an LLM provider API key in Settings to enable transcription and note generation."
+    case (false, false):
+        return nil
     }
 }
 
