@@ -12,7 +12,7 @@ struct MenuBarMenu: View {
         Button("New Note") {
             newNote()
         }
-        Button("Import Audio or Video into New Note…") {
+        Button("Import Audio/Video into New Note…") {
             importIntoNewNote()
         }
         Button("Start Recording in New Note") {
