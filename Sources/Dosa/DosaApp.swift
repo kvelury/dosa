@@ -47,6 +47,10 @@ final class AppState: ObservableObject {
     /// Work that should begin as soon as a note's editor appears. The editor is rebuilt
     /// on selection change, so a request made while creating the note has to outlive it.
     @Published var pendingNoteAction: PendingNoteAction?
+    /// Notes whose audio import is still transcoding. On AppState rather than the
+    /// editor because the import Task outlives the view — and because quitting has
+    /// to know about it.
+    @Published var importingNoteIds: Set<UUID> = []
     /// Bumped when Settings closes; ContentView uses it to rebuild the view tree
     /// so theme changes apply everywhere at once.
     @Published var themeRefreshTick = 0
@@ -54,6 +58,8 @@ final class AppState: ObservableObject {
 
 @main
 struct DosaApp: App {
+    static let mainWindowID = "main"
+
     @StateObject private var store = NotesStore()
     @StateObject private var recorder = AudioRecorder()
     @StateObject private var player = AudioPlayer()
@@ -64,7 +70,7 @@ struct DosaApp: App {
     @StateObject private var notifier = NotificationManager()
 
     var body: some Scene {
-        WindowGroup("Dosa") {
+        Window("Dosa", id: Self.mainWindowID) {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(recorder)
@@ -100,6 +106,16 @@ struct DosaApp: App {
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit Dosa") {
+                    QuitGuard.requestQuit(
+                        recorder: recorder,
+                        generator: generator,
+                        appState: appState
+                    )
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
             CommandGroup(replacing: .saveItem) {
                 Button("Close Note") {
                     appState.selectedNoteIds = []
@@ -117,5 +133,19 @@ struct DosaApp: App {
                 .keyboardShortcut("f", modifiers: .command)
             }
         }
+
+        MenuBarExtra {
+            MenuBarMenu()
+                .environmentObject(store)
+                .environmentObject(appState)
+                .environmentObject(recorder)
+                .environmentObject(generator)
+        } label: {
+            Image(nsImage: MenuBarIcon.current(
+                recording: recorder.isRecording,
+                phase: recorder.ringPhase
+            ))
+        }
+        .menuBarExtraStyle(.menu)
     }
 }

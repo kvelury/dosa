@@ -1,6 +1,92 @@
 import SwiftUI
 import AppKit
 
+/// Menu bar icons, drawn rather than rasterized because the recording animation
+/// needs each ring rotated independently — a flat raster can't give that.
+/// Geometry mirrors Resources/Branding/dosa-menubarTemplate.svg exactly; the raw
+/// numbers below are that file's, so keep them in sync if the SVG changes.
+enum MenuBarIcon {
+    static let frameCount = 24
+
+    private static let canvas: CGFloat = 18
+    /// The SVG's <g transform="translate(11,11) scale(0.1333)"> against its 22-unit viewBox.
+    private static let unit = (canvas / 22.0) * 0.1333
+
+    static let idle = frame(angle: 0, filledCore: false)
+    static let recordingStill = frame(angle: 0, filledCore: true)
+    /// 24 frames × 15° = one full revolution.
+    static let recordingFrames: [NSImage] =
+        (0..<frameCount).map {
+            frame(angle: Double($0) * 360.0 / Double(frameCount), filledCore: true)
+        }
+
+    static func current(recording: Bool, phase: Int) -> NSImage {
+        guard recording else { return idle }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            return recordingStill
+        }
+        return recordingFrames[phase % frameCount]
+    }
+
+    private static func frame(angle: Double, filledCore: Bool) -> NSImage {
+        let image = NSImage(
+            size: NSSize(width: canvas, height: canvas),
+            flipped: false
+        ) { _ in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return true }
+            ctx.translateBy(x: canvas / 2, y: canvas / 2)
+            NSColor.black.setStroke()
+            NSColor.black.setFill()
+
+            // outer: r=68, stroke-width=14, dash 409/18 — rotates one way…
+            ring(ctx, r: 68, width: 14, dash: [409, 18], degrees: angle)
+            // inner: r=42, stroke-width=14, dash 246/18, base rotate(-30) — …the other.
+            ring(ctx, r: 42, width: 14, dash: [246, 18], degrees: -30 - angle)
+
+            if filledCore {
+                fillCircle(ctx, r: 18)
+            } else {
+                ring(ctx, r: 13, width: 9, dash: [], degrees: 0)
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    private static func ring(
+        _ ctx: CGContext,
+        r: CGFloat,
+        width: CGFloat,
+        dash: [CGFloat],
+        degrees: Double
+    ) {
+        ctx.saveGState()
+        ctx.rotate(by: CGFloat(degrees * .pi / 180))
+        ctx.setLineWidth(width * unit)
+        ctx.setLineDash(phase: 0, lengths: dash.map { $0 * unit })
+        let radius = r * unit
+        ctx.addEllipse(in: CGRect(
+            x: -radius,
+            y: -radius,
+            width: radius * 2,
+            height: radius * 2
+        ))
+        ctx.strokePath()
+        ctx.restoreGState()
+    }
+
+    private static func fillCircle(_ ctx: CGContext, r: CGFloat) {
+        let radius = r * unit
+        ctx.fillEllipse(in: CGRect(
+            x: -radius,
+            y: -radius,
+            width: radius * 2,
+            height: radius * 2
+        ))
+    }
+}
+
 /// Dosa's brand mark, tinted per appearance (brown on light, amber on dark —
 /// true across every UI theme preset, since each one's editor background is a
 /// near-white/near-black neutral regardless of accent). Loads the two PNGs

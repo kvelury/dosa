@@ -83,11 +83,13 @@ Sources/Dosa/
   DiffEngine / SearchService         word diff, search + reveal machinery
   Notion/                            OAuth (DCR+PKCE), minimal MCP client, export logic
   Views/                             SwiftUI + AppKit-backed markdown editor
-  Branding.swift                     in-app brand mark (DosaMark), tinted per appearance
+    MenuBarMenu.swift                windowless new/import/record/settings/quit actions
+  Branding.swift                     in-app mark + animated template menu-bar icons
+  QuitGuard.swift                    confirms quit while work is running
 
-Resources/Branding/                  source SVGs for the app icon + in-app mark
+Resources/Branding/                  source SVGs for app, in-app, and menu-bar marks
 Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into the shipped
-                                      AppIcon.icns and dosa-mark-{light,dark}.png (run by build.sh)
+                                      app and in-app assets (run by build.sh)
 ```
 
 ## Known limitations
@@ -97,7 +99,7 @@ Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into th
 - **Imported files get no speaker separation on the on-device engines.** That split depends on Dosa having captured your mic and the system audio as two tracks, which an imported file doesn't have — so on-device transcription of an import produces unlabeled `[mm:ss]` lines. Gemini (Cloud) diarizes fine from a single file. Dosa says so in a toast at import time when an on-device engine is selected.
 - WebM and Ogg/Opus files can't be imported — AVFoundation can't demux those containers, so convert to `.m4a` or `.mp4` first. Any file with no readable audio track fails with a clear message and leaves the note untouched.
 - Import isn't cancellable once started, and very large video files are transcoded in full before the note updates.
-- The menu-bar template icons in `Resources/Branding/` (`dosa-menubarTemplate.svg`, `dosa-menubarRecordingTemplate.svg`) aren't wired up yet — Dosa has no menu-bar-extra status item today, so they're reserved for if/when that's built.
+- Dosa remains a normal Dock app and also has a persistent menu-bar item. Its icon geometry comes from `dosa-menubarTemplate.svg` and `dosa-menubarRecordingTemplate.svg`; while recording, the two dashed rings counter-rotate around a fixed filled core. Menu actions can recreate the main window for new notes, imports, recording, and Settings.
 - Ad-hoc signing means permission grants can reset on rebuild.
 - Notion sync is one-way (export/update); bi-directional sync is designed but not built (see the design doc §10.4).
 - The OpenAI provider tab in Settings is a stub; Gemini, Anthropic, and DeepSeek are the working providers.
