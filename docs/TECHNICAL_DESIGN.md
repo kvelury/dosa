@@ -433,19 +433,25 @@ clock, and a "Go back to note" link. It is not dismissible. Gate on `isRecording
 clears that before `recordingNoteId`, so the toast leaves the instant Stop is pressed.
 
 It is a toast, not a banner: `.overlay(alignment: .top)` on the detail `Group`, same slot as the
-transient toast. A `safeAreaInset` was considered and rejected — the note title is leading-aligned
-and the toast is centered, so they sit side by side. Both toasts share one overlay `VStack` so they
-can never draw on top of each other; the recording toast is first (on top) so a transient
-"recording saved" / "notes ready" message never shoves it down. `.padding(.top, 10)` sits on that
-`VStack` (not on each toast) to keep the stack clear of the hidden titlebar (§9b). The overlay stays
-after `.id(themeRefreshTick)` and before `SetupBannerInset`, so a theme refresh doesn't flicker it
-and the setup banner pushes both toasts down.
+transient toast, and a `Capsule()` matching that toast's shape. A `safeAreaInset` was considered and
+rejected — the note title is leading-aligned and the toast is centered, so they sit side by side.
+Both toasts share one overlay `VStack` so they can never draw on top of each other; the recording
+toast is first (on top) so a transient "recording saved" / "notes ready" message never shoves it
+down. `.padding(.top, 10)` sits on that `VStack` (not on each toast) to keep the stack clear of the
+hidden titlebar (§9b). The overlay stays after `.id(themeRefreshTick)` and before `SetupBannerInset`,
+so a theme refresh doesn't flicker it and the setup banner pushes both toasts down.
+
+Horizontal padding is 22 pt, not the transient toast's 14: two lines plus vertical padding make the
+card ≈ 54 pt tall, so a `Capsule`'s end radius is ≈ 27 pt and 14 pt would crowd the curve. Do not
+tidy this back to 14 without changing the height.
 
 The red 1.5 pt border is `.overlay(shape.strokeBorder(.red, lineWidth: 1.5))` *on top of*
 `floatingChrome`, not a colour on the chrome itself — chrome has no colour parameter, and the
 macOS 26 glass branch draws no stroke, so only an overlay lands in both branches. The red is
-SwiftUI's system `.red` (destructive red is not themeable, §8). The link is `.buttonStyle(.link)`:
-controls inside glass stay on system button styles (§9c above).
+SwiftUI's system `.red` (destructive red is not themeable, §8). The link is an underlined
+`.buttonStyle(.plain)` `Text` in `Theme.current.accentColor`: `.plain` is still a system style and
+draws no competing chrome (§9c above). The colour is themeable (and follows Accent Override) on
+purpose; the border's `.red` is not. Do not tint the border to match the link.
 
 The ellipsis is not its own timer. `AudioRecorder.ringPhase` already ticks 0→23 on the 0.09 s
 recording timer; `AnimatedEllipsis` derives three opacity states from `ringPhase / 8`, and Reduce

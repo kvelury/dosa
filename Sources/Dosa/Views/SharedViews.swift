@@ -441,13 +441,11 @@ struct RecordingAwayToast: View {
     let noteExists: Bool
     let onGoBack: () -> Void
 
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-    }
+    private var shape: Capsule { Capsule() }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
+        VStack(spacing: 2) {
+            HStack(spacing: 10) {
                 Circle()
                     .fill(.red)
                     .frame(width: 7, height: 7)
@@ -455,7 +453,6 @@ struct RecordingAwayToast: View {
                     Text("Recording")
                     AnimatedEllipsis(ringPhase: ringPhase)
                 }
-                Spacer()
                 Text(TimeFormatting.clock(elapsed))
                     .font(.system(.callout, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -463,11 +460,15 @@ struct RecordingAwayToast: View {
             .font(.callout)
 
             if noteExists {
-                Button("Go back to note", action: onGoBack)
-                    .buttonStyle(.link)
+                Button(action: onGoBack) {
+                    Text("Go back to note")
+                        .underline()
+                        .foregroundStyle(Theme.current.accentColor)
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 22)
         .padding(.vertical, 10)
         .floatingChrome(in: shape)
         .overlay(shape.strokeBorder(.red, lineWidth: 1.5))
