@@ -6,14 +6,25 @@ struct MenuBarMenu: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var recorder: AudioRecorder
     @EnvironmentObject private var generator: GenerationManager
+    @EnvironmentObject private var notifier: NotificationManager
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Button("New Note") {
             newNote()
         }
-        Button("Start Recording in New Note") {
-            startRecording()
+        if recorder.isRecording {
+            Button("Stop Recording") {
+                RecordingCommand.stop(recorder: recorder, store: store, notifier: notifier)
+            }
+        } else {
+            Button("Start Recording in New Note") {
+                RecordingCommand.startInNewNote(
+                    store: store,
+                    appState: appState,
+                    openWindow: openWindow
+                )
+            }
         }
         Button("Import Audio/Video into New Note…") {
             importIntoNewNote()
@@ -34,13 +45,6 @@ struct MenuBarMenu: View {
 
     private func newNote() {
         let note = store.createNote()
-        appState.selectedNoteIds = [note.id]
-        showMainWindow()
-    }
-
-    private func startRecording() {
-        let note = store.createNote()
-        appState.pendingNoteAction = PendingNoteAction(noteId: note.id, kind: .record)
         appState.selectedNoteIds = [note.id]
         showMainWindow()
     }

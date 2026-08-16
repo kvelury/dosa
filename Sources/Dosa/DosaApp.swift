@@ -84,20 +84,12 @@ struct DosaApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("New Note") {
-                    let note = store.createNote()
-                    appState.selectedNoteIds = [note.id]
-                }
-                .keyboardShortcut("n", modifiers: .command)
-                Button("Import Audio or Video…") {
-                    guard let url = RecordingImporter.pickFile(for: .newNote) else { return }
-                    let note = store.createNote()
-                    appState.pendingNoteAction = PendingNoteAction(noteId: note.id, kind: .importFile(url))
-                    appState.selectedNoteIds = [note.id]
-                }
-                .keyboardShortcut("o", modifiers: .command)
-            }
+            RecordingCommands(
+                store: store,
+                appState: appState,
+                recorder: recorder,
+                notifier: notifier
+            )
             // Settings is a sheet, not a Settings scene, so the standard app-menu
             // slot has to be filled by hand — otherwise ⌘, is dead.
             CommandGroup(replacing: .appSettings) {
@@ -140,6 +132,7 @@ struct DosaApp: App {
                 .environmentObject(appState)
                 .environmentObject(recorder)
                 .environmentObject(generator)
+                .environmentObject(notifier)
         } label: {
             Image(nsImage: MenuBarIcon.current(
                 recording: recorder.isRecording,

@@ -68,10 +68,7 @@ struct NoteEditorView: View {
                 viewMode = .aiNotes
             }
             handleReveal(search.pendingReveal)
-            if let pending = appState.pendingNoteAction, pending.noteId == noteId {
-                appState.pendingNoteAction = nil
-                begin(pending.kind)
-            }
+            consumePendingAction()
         }
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleFileDrop(providers)
@@ -86,6 +83,7 @@ struct NoteEditorView: View {
                 showNoteSearch = true
             }
         }
+        .onChange(of: appState.pendingNoteAction) { _, _ in consumePendingAction() }
         .overlay(alignment: .bottom) {
             floatingBar(current: current)
         }
@@ -114,7 +112,7 @@ struct NoteEditorView: View {
             Text("The note, its transcript, and its recording move to Deleted Notes, and are permanently removed after \(NotesStore.trashRetentionDays) days.")
         }
         .confirmationDialog(
-            "This note already has \(existingWorkDescription(current) ?? "content")",
+            "This note already has \(current.existingWorkDescription ?? "content")",
             isPresented: Binding(
                 get: { pendingReplacement != nil },
                 set: { if !$0 { pendingReplacement = nil } }
@@ -627,19 +625,6 @@ struct NoteEditorView: View {
         )
     }
 
-    /// What attaching new audio would destroy on this note, phrased for the prompt.
-    /// Nil when the note is empty and the action is safe to run immediately.
-    private func existingWorkDescription(_ note: Note) -> String? {
-        let hasRecording = note.recordingFileName != nil
-        let hasNotes = note.transcript != nil || note.enhancedMarkdown != nil
-        switch (hasRecording, hasNotes) {
-        case (true, true): return "a recording and generated notes"
-        case (true, false): return "a recording"
-        case (false, true): return "generated notes"
-        case (false, false): return nil
-        }
-    }
-
     private func replaceWarning(_ note: Note, kind: PendingNoteAction.Kind) -> String {
         let verb = kind.isImport ? "Importing here" : "Recording again here"
         return note.recordingFileName != nil
@@ -651,7 +636,7 @@ struct NoteEditorView: View {
     /// existing work without asking first.
     private func requestAudio(_ kind: PendingNoteAction.Kind) {
         guard let current = store.note(id: noteId) else { return }
-        if existingWorkDescription(current) != nil {
+        if current.existingWorkDescription != nil {
             pendingReplacement = kind
             return
         }
@@ -730,20 +715,17 @@ struct NoteEditorView: View {
         return true
     }
 
+    /// Picks up a record/import request aimed at this note. Nils the field
+    /// before acting so `onAppear` and `onChange` cannot both run it.
+    private func consumePendingAction() {
+        guard let pending = appState.pendingNoteAction, pending.noteId == noteId else { return }
+        appState.pendingNoteAction = nil
+        begin(pending.kind)
+    }
+
     private func stopRecording() {
-        Task {
-            do {
-                let recording = try await recorder.stop()
-                store.setRecording(
-                    noteId: recording.noteId,
-                    fileName: recording.fileName,
-                    duration: recording.duration
-                )
-                let title = store.note(id: recording.noteId)?.displayTitle ?? "Untitled Note"
-                notifier.post(.recordingSaved(noteId: recording.noteId, title: title))
-            } catch {
-                localError = error.localizedDescription
-            }
+        RecordingCommand.stop(recorder: recorder, store: store, notifier: notifier) { error in
+            localError = error.localizedDescription
         }
     }
 
