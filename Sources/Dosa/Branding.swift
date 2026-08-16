@@ -35,13 +35,17 @@ enum MenuBarIcon {
         ) { _ in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return true }
             ctx.translateBy(x: canvas / 2, y: canvas / 2)
+            // The SVG's y axis points down. Matching it is what lands each
+            // ring's single gap where the app icon has it — drawing y-up
+            // mirrors the gaps into the lower half.
+            ctx.scaleBy(x: 1, y: -1)
             NSColor.black.setStroke()
             NSColor.black.setFill()
 
             // outer: r=68, stroke-width=14, dash 409/18 — rotates one way…
-            ring(ctx, r: 68, width: 14, dash: [409, 18], degrees: angle)
+            ring(ctx, r: 68, width: 14, dash: [409, 18], degrees: -angle)
             // inner: r=42, stroke-width=14, dash 246/18, base rotate(-30) — …the other.
-            ring(ctx, r: 42, width: 14, dash: [246, 18], degrees: -30 - angle)
+            ring(ctx, r: 42, width: 14, dash: [246, 18], degrees: -30 + angle)
 
             if filledCore {
                 fillCircle(ctx, r: 18)
