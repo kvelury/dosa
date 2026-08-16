@@ -21,7 +21,7 @@ struct WelcomeView: View {
             VStack(spacing: 30) {
                 VStack(spacing: 10) {
                     Text(greeting)
-                        .font(.largeTitle.bold())
+                        .font(.system(size: 36, weight: .bold))
                         .multilineTextAlignment(.center)
 
                     Text("Record meetings straight from your Mac's audio — Zoom, Meet, Teams, Huddles, anything — jot quick notes, and let Dosa turn them into polished meeting notes.")
