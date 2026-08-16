@@ -449,8 +449,8 @@ The red 1.5 pt border is `.overlay(shape.strokeBorder(.red, lineWidth: 1.5))` *o
 `floatingChrome`, not a colour on the chrome itself — chrome has no colour parameter, and the
 macOS 26 glass branch draws no stroke, so only an overlay lands in both branches. The red is
 SwiftUI's system `.red` (destructive red is not themeable, §8). The link is an underlined
-`.buttonStyle(.plain)` `Text` in `Theme.current.accentColor`: `.plain` is still a system style and
-draws no competing chrome (§9c above). The colour is themeable (and follows Accent Override) on
+`.callout` `.buttonStyle(.plain)` `Text` in `Theme.current.accentColor` — same size as the
+status line; `.plain` is still a system style and draws no competing chrome (§9c above). The colour is themeable (and follows Accent Override) on
 purpose; the border's `.red` is not. Do not tint the border to match the link.
 
 The ellipsis is not its own timer. `AudioRecorder.ringPhase` already ticks 0→23 on the 0.09 s

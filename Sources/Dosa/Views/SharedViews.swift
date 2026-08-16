@@ -462,6 +462,7 @@ struct RecordingAwayToast: View {
             if noteExists {
                 Button(action: onGoBack) {
                     Text("Go back to note")
+                        .font(.callout)
                         .underline()
                         .foregroundStyle(Theme.current.accentColor)
                 }
