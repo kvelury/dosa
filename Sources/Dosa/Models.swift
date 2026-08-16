@@ -33,6 +33,21 @@ struct Note: Identifiable, Codable, Hashable {
     }
 }
 
+extension Note {
+    /// What attaching new audio would destroy on this note, phrased for the prompt.
+    /// Nil when the note is empty and the action is safe to run immediately.
+    var existingWorkDescription: String? {
+        let hasRecording = recordingFileName != nil
+        let hasNotes = transcript != nil || enhancedMarkdown != nil
+        switch (hasRecording, hasNotes) {
+        case (true, true):   return "a recording and generated notes"
+        case (true, false):  return "a recording"
+        case (false, true):  return "generated notes"
+        case (false, false): return nil
+        }
+    }
+}
+
 enum TimeFormatting {
     static func clock(_ interval: TimeInterval) -> String {
         let total = Int(interval.rounded())

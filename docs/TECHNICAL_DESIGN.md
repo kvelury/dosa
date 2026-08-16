@@ -47,6 +47,7 @@ Sources/Dosa/
   GenerationManager.swift  Transcribe→generate pipeline, cancellation, post-processing
   NotificationManager.swift  Recording-saved / notes-ready routing: toast if frontmost, macOS banner if not
   QuitGuard.swift        Busy-work detection + window-independent quit confirmation
+  RecordingCommand.swift Start/stop recording from ⌘R, File menu, and the menu bar
   DiffEngine.swift       Tokenizer + attributed diff + Dosa-color registry
   SearchService.swift    Match finding, snippets, SearchCoordinator (reveal bus)
   Notion/
@@ -92,6 +93,8 @@ The mark is brand-fixed brown/amber (`#7A4512` / `#E0A44E`) regardless of which 
 `DosaApp` has two scenes: a single-instance `Window("Dosa", id: "main")` and a persistent `MenuBarExtra`. Using `Window` rather than `WindowGroup` makes `openWindow(id:)` focus the existing main window or recreate it after the red close button, without ever spawning duplicates. Menu bar actions update `AppState` first and then open the window, so a newly mounted `ContentView` sees pending recording/import/settings state on its first render.
 
 The menu bar's **Quit Dosa** and the replaced `.appTermination` command both call `QuitGuard`. It checks recording, transcription/generation, and file-import state. Busy quits use an AppKit `NSAlert` because the main window may be closed; this is the deliberate windowless exception to the sheet-based error presentation in §13.
+
+The menu bar's recording item toggles: **Stop Recording** while a capture is running (same `RecordingCommand.stop` as ⌘R), **Start Recording in New Note** when idle (always a fresh note).
 
 **Window chrome**: `.windowStyle(.hiddenTitleBar)` — no title bar; traffic lights overlay the sidebar's top-left, which is why the sidebar's icon row has `.padding(.top, 34)`. The sidebar toggle is `NavigationSplitView`'s own, left where macOS puts it; the only thing the app adds to that region is the back-to-home arrow (`BackToHomeToolbarItem`). Do not mutate the `NSWindow` to "finish" this look — see §9b.
 
@@ -571,7 +574,7 @@ Events are posted from app-lifetime objects, not views, wherever the work can ou
 
 Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page, `⌘ N` style with a space):
 
-- **⌘N** New Note (replaces New Window) · **⌘O** Import Audio or Video (same `CommandGroup(replacing: .newItem)`; free because replacing that group removes the stock Open…) · **⌘W** Close Note = clear selection, no-op on welcome (replaces Close) · **⌘K** global search · **⌘F** in-note search (rides `noteSearchRequest: UUID?`; only acts when the open note has transcript/Dosa notes).
+- **⌘N** New Note (replaces New Window) · **⌘R** Start / stop recording (same `CommandGroup(replacing: .newItem)`, between New Note and Import). Stops a capture from anywhere and saves it to its own note. Starts in the open note when that note has no recording or generated work; otherwise creates a new note (welcome, multi-select, deleted). **No-op** — and the menu item is disabled — when the open note already has a recording, transcript, or generated notes: a keystroke must not be able to raise the replace-audio prompt (§4.1). The Record button in the floating bar still prompts. · **⌘O** Import Audio or Video (same group; free because replacing that group removes the stock Open…) · **⌘W** Close Note = clear selection, no-op on welcome (replaces Close) · **⌘K** global search · **⌘F** in-note search (rides `noteSearchRequest: UUID?`; only acts when the open note has transcript/Dosa notes).
 - Editor-local: ⌘Z/⇧⌘Z undo/redo, Tab/⇧Tab indent/outdent, Return list continuation (§6.1).
 
 ---

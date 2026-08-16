@@ -18,7 +18,7 @@ struct WelcomeView: View {
             DosaWatermark(color: Theme.current.highlightColor)
                 .ignoresSafeArea(edges: .top)
 
-            VStack(spacing: 30) {
+            VStack(spacing: 26) {
                 VStack(spacing: 10) {
                     Text(greeting)
                         .font(.system(size: 36, weight: .bold))
@@ -47,12 +47,17 @@ struct WelcomeView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.current.editorBackgroundColor.ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) {
-            HStack(spacing: 18) {
-                ShortcutHint(keys: "⌘ N", label: "New note")
-                ShortcutHint(keys: "⌘ O", label: "Import file")
-                ShortcutHint(keys: "⌘ K", label: "Search everywhere")
-                ShortcutHint(keys: "⌘ F", label: "Search in note")
-                ShortcutHint(keys: "⌘ W", label: "Close note")
+            VStack(spacing: 10) {
+                HStack(spacing: 18) {
+                    ShortcutHint(keys: "⌘ N", label: "New note")
+                    ShortcutHint(keys: "⌘ R", label: "Start Recording")
+                    ShortcutHint(keys: "⌘ O", label: "Import file")
+                }
+                HStack(spacing: 18) {
+                    ShortcutHint(keys: "⌘ K", label: "Search everywhere")
+                    ShortcutHint(keys: "⌘ F", label: "Search in note")
+                    ShortcutHint(keys: "⌘ W", label: "Close note")
+                }
             }
             .padding(.bottom, 18)
         }
@@ -74,7 +79,7 @@ private struct ShortcutHint: View {
             Text(label)
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
-                // Five hints are a tight fit in a narrow window; shrink rather than clip.
+                // Headroom for the longest label ("Start Recording") at minimum width.
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .fixedSize(horizontal: false, vertical: true)

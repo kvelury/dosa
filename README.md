@@ -52,6 +52,7 @@ Installing is opt-in: `--install` quits any running copy, then replaces `/Applic
 |---|---|
 | ⌘N | New note |
 | ⌘O | Import an audio or video file into a new note |
+| ⌘R | Start / stop recording |
 | ⌘W | Close note (back to welcome) |
 | ⌘K | Search all notes & transcripts |
 | ⌘F | Search within the open note |
@@ -86,6 +87,7 @@ Sources/Dosa/
     MenuBarMenu.swift                windowless new/import/record/settings/quit actions
   Branding.swift                     in-app mark + animated template menu-bar icons
   QuitGuard.swift                    confirms quit while work is running
+  RecordingCommand.swift             start/stop recording from ⌘R, File menu, and the menu bar
 
 Resources/Branding/                  source SVGs for app, in-app, and menu-bar marks
 Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into the shipped
