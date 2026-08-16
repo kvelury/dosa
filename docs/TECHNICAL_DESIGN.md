@@ -379,11 +379,13 @@ The last round of this produced a toggle floating in the vertical middle of the 
 
 ## 9c. Floating overlay chrome (Liquid Glass, with a pre-26 fallback)
 
-Two overlays float above the editor and share one look: the recording bar (bottom) and the toast
-(top). `FloatingChrome` in `SharedViews.swift` is that look, and it is the only place the decision is
-made — `.floatingChrome(in: shape)` at the two call sites in `NoteEditorView.swift`.
+Three overlays float above the editor and share one look: the recording bar (bottom), the persistent
+recording-away toast (top), and the transient event toast (top, below the persistent one when both
+are up). `FloatingChrome` in `SharedViews.swift` is that look, and it is the only place the decision
+is made — `.floatingChrome(in: shape)` at the recording bar in `NoteEditorView.swift` and at both
+toasts in `ContentView.swift`.
 
-(The ⋯ actions menu used to be a third, a floating pill in the top-trailing corner. It is a
+(The ⋯ actions menu used to float as a pill in the top-trailing corner. It is a
 `ToolbarItem(placement: .primaryAction)` now, so that it sits on the same line as the sidebar toggle
 and the back arrow instead of below them — see the toolbar-glass rule further down.)
 
@@ -403,22 +405,51 @@ Details that are load-bearing:
 
 - **Never `.interactive()`.** `Glass.interactive()` is for glass that is itself one button; on a
   container holding its own controls it lights the whole surface up when the pointer approaches any
-  control inside it, and both surfaces left here are containers. `FloatingChrome` therefore takes no
+  control inside it, and the surfaces left here are containers. `FloatingChrome` therefore takes no
   `interactive:` parameter — the one control that wanted it, the ⋯ pill, is a toolbar item now and
   gets the system's interactive glass for free.
 - Glass is applied **last**, after padding and `clipShape`, per Apple's "apply `glassEffect` after
   other modifiers that affect appearance." In the recording bar the `clipShape` sits above the
   chrome so the transcription progress hairline is clipped as content and stays *above* the glass
   (glass renders behind the content it wraps).
-- No `GlassEffectContainer`: it exists to blend and morph *adjacent* glass shapes, and these two are
-  single isolated surfaces in different corners. Add one only if two glass shapes ever sit side by
-  side. The quick-settings panel (§9d) deliberately does not qualify — it is drawn as part of the
-  bar's own shape, not as a second surface; the titlebar row does not either, because those are
-  toolbar items and the system already groups them (see `ToolbarSpacer` below).
+- No `GlassEffectContainer`: it exists to blend and morph *adjacent* glass shapes, and the recording
+  bar and the toast stack are isolated surfaces in different corners. Add one only if two glass
+  shapes ever sit side by side. The two toasts share a `VStack` so they stack; they do not morph.
+  The quick-settings panel (§9d) deliberately does not qualify — it is drawn as part of the bar's
+  own shape, not as a second surface; the titlebar row does not either, because those are toolbar
+  items and the system already groups them (see `ToolbarSpacer` below).
 - Buttons inside the bar stay `.bordered` / `.borderedProminent`. Those pick up the 26 look
   automatically when recompiled, and glass-on-glass is explicitly against Apple's guidance.
 - Glass refracts what is behind it, so over the editor's flat background it reads as a subtle tint
   rather than the dramatic refraction in Apple's marketing. That is correct output, not a failure.
+
+**Recording-away toast.** ⌘R can start a capture from anywhere, and every on-screen trace of that
+capture (waveform, elapsed clock, stop button) lives in `NoteEditorView`'s floating bar, which
+unmounts the moment you leave the note. Whenever `AudioRecorder.isRecording` is true and the detail
+pane is showing anything other than that recording's own note (`recordingNoteId !=
+AppState.singleSelectedNoteId`; Welcome and multi-select both have a nil single selection, so both
+show it), `ContentView` draws a persistent `RecordingAwayToast`: "Recording…" plus the live elapsed
+clock, and a "Go back to note" link. It is not dismissible. Gate on `isRecording` first — `finish`
+clears that before `recordingNoteId`, so the toast leaves the instant Stop is pressed.
+
+It is a toast, not a banner: `.overlay(alignment: .top)` on the detail `Group`, same slot as the
+transient toast. A `safeAreaInset` was considered and rejected — the note title is leading-aligned
+and the toast is centered, so they sit side by side. Both toasts share one overlay `VStack` so they
+can never draw on top of each other; the recording toast is first (on top) so a transient
+"recording saved" / "notes ready" message never shoves it down. `.padding(.top, 10)` sits on that
+`VStack` (not on each toast) to keep the stack clear of the hidden titlebar (§9b). The overlay stays
+after `.id(themeRefreshTick)` and before `SetupBannerInset`, so a theme refresh doesn't flicker it
+and the setup banner pushes both toasts down.
+
+The red 1.5 pt border is `.overlay(shape.strokeBorder(.red, lineWidth: 1.5))` *on top of*
+`floatingChrome`, not a colour on the chrome itself — chrome has no colour parameter, and the
+macOS 26 glass branch draws no stroke, so only an overlay lands in both branches. The red is
+SwiftUI's system `.red` (destructive red is not themeable, §8). The link is `.buttonStyle(.link)`:
+controls inside glass stay on system button styles (§9c above).
+
+The ellipsis is not its own timer. `AudioRecorder.ringPhase` already ticks 0→23 on the 0.09 s
+recording timer; `AnimatedEllipsis` derives three opacity states from `ringPhase / 8`, and Reduce
+Motion pins all three dots on. All three dots stay laid out so the clock never shifts.
 
 **The titlebar row is glass the app does not draw itself.** Three controls share that line — the system sidebar toggle, the back arrow (`.navigation`, §9b), and the ⋯ actions menu (`.primaryAction`, declared on `NoteEditorView` because it needs the open note). On macOS 26 the system wraps toolbar items in Liquid Glass; the sidebar toggle's pill *is* that treatment, not a bespoke one, and the other two get the identical pill for free.
 
@@ -437,10 +468,10 @@ Do not reach for `.padding` or `.offset` to reposition a toolbar item — SwiftU
 
 > **CALLOUT — never write `if #available` inside a `@ToolbarContentBuilder` closure while the deployment target is below macOS 14.5.** `ToolbarContentBuilder.buildLimitedAvailability` has two overloads; the usable one is `@available(macOS 14.5, *)`, and `Package.swift` targets 14.0, so the compiler silently selects the other — `obsoleted: 14.5`, message "this code may crash on earlier versions of the OS" — whose body performs no type erasure at all. Hoist the check up to the `ViewBuilder` level instead (`ViewBuilder`'s equivalent is unconstrained), which is why `BackToWelcomeToolbar` is a `ViewModifier` that applies two whole different `.toolbar { }` blocks rather than one block with a branch inside. A `buildLimitedAvailability` deprecation warning in the build output means this slipped back in; hoist it, never silence it.
 
-> **KNOWN, UNFIXED — the pointer shows an I-beam over the recording bar and the toast.** They sit
+> **KNOWN, UNFIXED — the pointer shows an I-beam over the recording bar and both toasts.** They sit
 > above `PaddedTextView`, and an `NSTextView` claims the I-beam across its whole visible area. (The
 > ⋯ menu no longer has this: as a toolbar item it is not over the text view at all.) Clicks
-> work; the pointer just reads as a text caret over the recording bar. Three layered-on-top fixes
+> work; the pointer just reads as a text caret over the floating surfaces. Three layered-on-top fixes
 > were tried and all three lost, because the text view re-asserts its claim from inside its own
 > `resetCursorRects`: an arrow cursor rect on a view above it, an `.inVisibleRect`/`.cursorUpdate`
 > tracking area above it, and `pointerStyle(.default)` (macOS 15+). A subtractive fix — markers
@@ -608,6 +639,7 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 17. Swift concurrency: Swift 5 language mode; Sendable warnings exist and are accepted. `NotesStore` non-isolated on purpose; managers `@MainActor`.
 18. **Hiding the window toolbar killed traffic lights + sidebar toggle** — `.toolbar(.hidden, for: .windowToolbar)` plus an `NSWindow` `styleMask` poke (`HiddenTitleBarChrome`) collapsed the titlebar; the sidebar's traffic-light padding became a dead strip. This shipped once. Use `.toolbarBackground(.hidden, …)` instead — §9b.
 19. **Relocating `NavigationSplitView`'s sidebar toggle is a trap** — it sits near the split, not by the traffic lights, and that is standard macOS placement. A `ToolbarItem` replacement duplicates it; an overlay positioned from `standardWindowButton(.zoomButton)` is measured against the titlebar view, a sibling of SwiftUI's content view, and landed mid-sidebar with a dead strip on top. Both shipped. Leave the system toggle alone — §9b, enforced by `Scripts/check-window-chrome.sh`.
+20. **Recording-away toast is hidden behind sheets** — Settings, Global Search, Transcript, ErrorDialog, the confirmation dialogs. Sheets are modal and short-lived; the menu bar rings keep spinning. Do not hoist the toast above a sheet (that needs a window-level overlay or an `NSPanel`).
 
 ## 15. Verification checklist (manual)
 
