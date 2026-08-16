@@ -24,6 +24,10 @@ final class AudioRecorder: NSObject, ObservableObject {
     /// Rolling window of recent audio levels (0-1), newest last — drives the
     /// live waveform so the user can see that audio is actually being captured.
     @Published var levelHistory: [Float] = AudioRecorder.emptyLevels
+    /// Frame index for the menu bar's counter-rotating rings. Published like
+    /// levelHistory — UI-only state the recorder happens to be the right owner of,
+    /// since it already knows exactly when recording starts and stops.
+    @Published private(set) var ringPhase = 0
     /// Set when a capture ends on its own instead of via `stop()` — most often the
     /// system audio stream dying mid-meeting. Whatever was captured is salvaged
     /// first; the app observes this to save it and tell the user.
@@ -74,6 +78,7 @@ final class AudioRecorder: NSObject, ObservableObject {
     private let sampleQueue = DispatchQueue(label: "com.dosa.audio.samples")
     private var timer: Timer?
     private var levelTimer: Timer?
+    private var ringTimer: Timer?
     private var startedAt: Date?
     private var peakLevel: Float = 0   // written on sampleQueue only
     private var destination: Destination?
@@ -142,6 +147,10 @@ final class AudioRecorder: NSObject, ObservableObject {
             }
             self.levelTimer = Timer.scheduledTimer(withTimeInterval: 0.09, repeats: true) { [weak self] _ in
                 self?.shiftLevelHistory()
+            }
+            self.ringTimer = Timer.scheduledTimer(withTimeInterval: 0.09, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.ringPhase = (self.ringPhase + 1) % MenuBarIcon.frameCount
             }
         }
     }
@@ -220,6 +229,9 @@ final class AudioRecorder: NSObject, ObservableObject {
             self.timer = nil
             self.levelTimer?.invalidate()
             self.levelTimer = nil
+            self.ringTimer?.invalidate()
+            self.ringTimer = nil
+            self.ringPhase = 0
             self.isRecording = false
             self.levelHistory = Self.emptyLevels
         }

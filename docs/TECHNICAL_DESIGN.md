@@ -33,12 +33,12 @@ Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), 
 
 ```
 Sources/Dosa/
-  DosaApp.swift          @main App; AppState; PendingNoteAction; commands (⌘N/⌘O/⌘W/⌘K/⌘F)
+  DosaApp.swift          @main App; AppState; Window + MenuBarExtra scenes; commands
   AppSettings.swift      All UserDefaults keys, default prompts, verbosity, appearance
   Theme.swift            Preset palettes + accent override + styleFingerprint
   Models.swift           Note, Folder, TimeFormatting
   NotesStore.swift       Persistence, folders, pins, trash, stats
-  AudioRecorder.swift    Mic + system-audio capture, m4a mixdown, level metering
+  AudioRecorder.swift    Mic + system-audio capture, m4a mixdown, level/menu-icon metering
   RecordingImporter.swift  File picker, format gate, and import error mapping
   AudioPlayer.swift      Playback with pause/seek/progress
   GeminiClient.swift     Gemini REST client + DetailedError protocol
@@ -46,6 +46,7 @@ Sources/Dosa/
   DeepSeekClient.swift   DeepSeek chat/completions REST client (text-only)
   GenerationManager.swift  Transcribe→generate pipeline, cancellation, post-processing
   NotificationManager.swift  Recording-saved / notes-ready routing: toast if frontmost, macOS banner if not
+  QuitGuard.swift        Busy-work detection + window-independent quit confirmation
   DiffEngine.swift       Tokenizer + attributed diff + Dosa-color registry
   SearchService.swift    Match finding, snippets, SearchCoordinator (reveal bus)
   Notion/
@@ -61,11 +62,12 @@ Sources/Dosa/
     TranscriptView.swift Transcript sheet (read-only MarkdownTextEditor)
     SearchViews.swift    Global search sheet, in-note popover, filter chips
     SettingsView.swift   All settings sections + export/import
+    MenuBarMenu.swift    Windowless new/import/record/settings/quit actions
     QuickSettingsPanel.swift  Model + Notes Style panel inside the recording bar's pull-tab
     WelcomeView.swift    Greeting, stats, shortcut hints
     DeletedNoteView.swift  Trash preview with restore/delete
     SharedViews.swift    FloatingChrome, BackToWelcomeToolbar, TrailingToolbarItem, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
-  Branding.swift         DosaMark (baked PNGs) + DosaWatermark (Canvas rings for WelcomeView)
+  Branding.swift         DosaMark PNGs + drawn menu-bar frames + DosaWatermark
 Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
 Resources/Branding/     Source SVGs (app icon, in-app mark, menu-bar templates — see §2b)
 build.sh / Scripts/make_icon.swift
@@ -73,16 +75,23 @@ build.sh / Scripts/make_icon.swift
 
 ### 2b. Branding assets (`Resources/Branding/`, `Scripts/make_icon.swift`, `Branding.swift`)
 
-All 7 source SVGs delivered with the current logo are committed under `Resources/Branding/` as the source of truth, but only two are wired into the app today:
+All 7 source SVGs delivered with the current logo are committed under `Resources/Branding/` as the source of truth. Two are rasterized into shipped assets, while two provide the geometry for the code-drawn menu bar icon:
 
 - `dosa-icon-1024.svg` → the app icon (`Resources/AppIcon.icns`).
 - `dosa-mark-currentcolor.svg` → the in-app brand mark (`DosaMark`), shown in the sidebar footer next to the version/model line. `WelcomeView` uses a matching vector backdrop (`DosaWatermark` in `Branding.swift`): the same rings (r = 70 / 52 / 34, dash gaps, rotations, filled core) drawn in a `Canvas` so they stay sharp at any window size, tinted from the active theme's `highlight` (not the brown/amber of `DosaMark`), and top-anchored so they sweep down over the upper half of the pane. The watermark replaced the old 112-pt hero `DosaMark` at the top of the welcome stack; the greeting now leads that stack in its place.
+- `dosa-menubarTemplate.svg` / `dosa-menubarRecordingTemplate.svg` → source-of-record geometry for `MenuBarIcon`. It draws resolution-independent 18 pt AppKit template images in code because the recording state needs each ring controlled independently: 24 frames counter-rotate the two single-gap rings while the filled core stays fixed. `AudioRecorder.ringPhase` advances the frame every 0.09 seconds; Reduce Motion selects a static recording frame.
 
-Both use `NSImage(contentsOfFile:)` to rasterize the *actual* SVG at build time rather than hand-reproducing the geometry in AppKit/SwiftUI — verified pixel-accurate against these files (plain `<rect>`/`<g transform>`/`<circle>` + `stroke-dasharray`, no CSS). `DosaMark` itself does zero SVG/asset loading at runtime beyond reading two plain PNGs baked at build time (`dosa-mark-light.png` / `dosa-mark-dark.png`) via `Bundle.main` — deliberately *not* SwiftPM's `resources:`/`Bundle.module` mechanism, since this project hand-assembles its `.app` in `build.sh` rather than letting SwiftPM produce one, and `Bundle.module`'s companion resource bundle would need its own separate copy step to land inside `build/Dosa.app/Contents/Resources/`. Reusing the exact `Resources/` → `cp` → `Bundle.main` path already proven for `Info.plist`/`AppIcon.icns` avoids that whole class of packaging bug.
+The app icon and in-app mark use `NSImage(contentsOfFile:)` to rasterize the *actual* SVG at build time rather than hand-reproducing the geometry in AppKit/SwiftUI — verified pixel-accurate against these files (plain `<rect>`/`<g transform>`/`<circle>` + `stroke-dasharray`, no CSS). The menu bar is the deliberate exception: independent ring animation is impossible from a flat raster, so its literal Core Graphics constants are kept traceable to the SVGs. `DosaMark` itself does zero SVG/asset loading at runtime beyond reading two plain PNGs baked at build time (`dosa-mark-light.png` / `dosa-mark-dark.png`) via `Bundle.main` — deliberately *not* SwiftPM's `resources:`/`Bundle.module` mechanism, since this project hand-assembles its `.app` in `build.sh` rather than letting SwiftPM produce one, and `Bundle.module`'s companion resource bundle would need its own separate copy step to land inside `build/Dosa.app/Contents/Resources/`. Reusing the exact `Resources/` → `cp` → `Bundle.main` path already proven for `Info.plist`/`AppIcon.icns` avoids that whole class of packaging bug.
 
 The mark is brand-fixed brown/amber (`#7A4512` / `#E0A44E`) regardless of which of the 5 accent-theme presets is selected — it switches only on light/dark **appearance** (`@Environment(\.colorScheme)`, which follows `AppSettings`'s Auto/Light/Dark override same as the rest of the app), since every theme preset's `editorBackground` is a near-white/near-black neutral (see §8) — the brown/amber pair reads fine against all of them.
 
-**Not yet wired up**: `dosa-menubarTemplate.svg` / `dosa-menubarRecordingTemplate.svg` — flat-black idle/recording icons sized for an `NSStatusItem`/`MenuBarExtra`, which Dosa doesn't have. `dosa-mark-cream.svg` (a lighter alternate mark, e.g. for a dark solid-color hero) and `dosa-mark-adaptive.svg` (the CSS self-adapting version — kept as reference for the intended color pairing, not for rendering) are also unused. All are preserved in `Resources/Branding/` for whenever those features exist.
+`dosa-mark-cream.svg` (a lighter alternate mark, e.g. for a dark solid-color hero) and `dosa-mark-adaptive.svg` (the CSS self-adapting version — kept as reference for the intended color pairing, not for rendering) remain unused.
+
+### 2c. App scenes and menu bar
+
+`DosaApp` has two scenes: a single-instance `Window("Dosa", id: "main")` and a persistent `MenuBarExtra`. Using `Window` rather than `WindowGroup` makes `openWindow(id:)` focus the existing main window or recreate it after the red close button, without ever spawning duplicates. Menu bar actions update `AppState` first and then open the window, so a newly mounted `ContentView` sees pending recording/import/settings state on its first render.
+
+The menu bar's **Quit Dosa** and the replaced `.appTermination` command both call `QuitGuard`. It checks recording, transcription/generation, and file-import state. Busy quits use an AppKit `NSAlert` because the main window may be closed; this is the deliberate windowless exception to the sheet-based error presentation in §13.
 
 **Window chrome**: `.windowStyle(.hiddenTitleBar)` — no title bar; traffic lights overlay the sidebar's top-left, which is why the sidebar's icon row has `.padding(.top, 34)`. The sidebar toggle is `NavigationSplitView`'s own, left where macOS puts it; the only thing the app adds to that region is the back-to-home arrow (`BackToHomeToolbarItem`). Do not mutate the `NSWindow` to "finish" this look — see §9b.
 
@@ -309,7 +318,7 @@ Full-document restyle on every change (cheap at note scale). Per line: headings 
 
 ## 9b. Window chrome & UI invariants
 
-`.windowStyle(.hiddenTitleBar)` on the `WindowGroup` is the **only** window-styling call. Traffic lights overlay the sidebar; `NavigationSplitView` still owns a window toolbar. The detail column's empty title slot otherwise shows through as a light/dark strip along the top of Welcome (the sidebar already draws under that region). The sanctioned fill is on the detail `Group` in `ContentView`:
+`.windowStyle(.hiddenTitleBar)` on the main `Window` scene is the **only** window-styling call. Traffic lights overlay the sidebar; `NavigationSplitView` still owns a window toolbar. The detail column's empty title slot otherwise shows through as a light/dark strip along the top of Welcome (the sidebar already draws under that region). The sanctioned fill is on the detail `Group` in `ContentView`:
 
 ```swift
 .toolbarBackground(.hidden, for: .windowToolbar)

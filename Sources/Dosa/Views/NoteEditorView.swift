@@ -26,7 +26,6 @@ struct NoteEditorView: View {
     @State private var confirmDiscardRecording = false
     /// The action waiting on the user's answer to the "already has content" prompt.
     @State private var pendingReplacement: PendingNoteAction.Kind?
-    @State private var isImporting = false
     @State private var isDropTargeted = false
     @State private var localError: String?
     @State private var localErrorDetail: String?
@@ -40,6 +39,10 @@ struct NoteEditorView: View {
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
     @State private var editorHighlight: TextHighlight?
     @State private var transcriptHighlight: TextHighlight?
+
+    private var isImporting: Bool {
+        appState.importingNoteIds.contains(noteId)
+    }
 
     var body: some View {
         if let noteBinding = store.noteBinding(id: noteId) {
@@ -684,9 +687,9 @@ struct NoteEditorView: View {
 
     private func beginImport(from url: URL) {
         player.stop()
-        isImporting = true
+        appState.importingNoteIds.insert(noteId)
         Task {
-            defer { isImporting = false }
+            defer { appState.importingNoteIds.remove(noteId) }
             do {
                 try await store.importRecording(from: url, into: noteId)
                 let title = store.note(id: noteId)?.displayTitle ?? "Untitled Note"
