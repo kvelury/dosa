@@ -18,11 +18,12 @@ enum RecordingCommand {
         store: NotesStore,
         appState: AppState,
         recorder: AudioRecorder,
+        generator: GenerationManager,
         notifier: NotificationManager,
         openWindow: OpenWindowAction
     ) {
         if recorder.isRecording {
-            stop(recorder: recorder, store: store, notifier: notifier)
+            stop(recorder: recorder, store: store, generator: generator, notifier: notifier)
             return
         }
         start(store: store, appState: appState, openWindow: openWindow)
@@ -31,11 +32,15 @@ enum RecordingCommand {
     /// Ends the capture wherever it started, saves it to its own note, and toasts.
     /// Callable with no editor mounted — this is what makes "stop from anywhere" work.
     ///
+    /// Also the one place automatic mode is triggered from, since every stop path
+    /// funnels through here.
+    ///
     /// `onError` is for the in-editor Stop button, which still owns the error sheet.
     /// ⌘R and the menu bar omit it and toast instead.
     static func stop(
         recorder: AudioRecorder,
         store: NotesStore,
+        generator: GenerationManager,
         notifier: NotificationManager,
         onError: ((Error) -> Void)? = nil
     ) {
@@ -48,7 +53,10 @@ enum RecordingCommand {
                     duration: recording.duration
                 )
                 let title = store.note(id: recording.noteId)?.displayTitle ?? "Untitled Note"
+                // Announced before the automatic run is queued so the two toasts
+                // can never arrive out of order.
                 notifier.post(.recordingSaved(noteId: recording.noteId, title: title))
+                generator.enqueueAutomatic(noteId: recording.noteId, store: store, notifier: notifier)
             } catch {
                 if let onError {
                     onError(error)
@@ -99,6 +107,7 @@ struct RecordingCommands: Commands {
     @ObservedObject var store: NotesStore
     @ObservedObject var appState: AppState
     @ObservedObject var recorder: AudioRecorder
+    @ObservedObject var generator: GenerationManager
     @ObservedObject var notifier: NotificationManager
     @Environment(\.openWindow) private var openWindow
 
@@ -114,6 +123,7 @@ struct RecordingCommands: Commands {
                     store: store,
                     appState: appState,
                     recorder: recorder,
+                    generator: generator,
                     notifier: notifier,
                     openWindow: openWindow
                 )

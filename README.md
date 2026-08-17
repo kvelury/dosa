@@ -12,6 +12,7 @@ Because audio is intercepted at the OS level (not via meeting-platform APIs), it
 - **Recordings can't be clobbered** — every recording gets its own never-reused filename, so no import, re-record, or crash recovery can write over audio that already exists. Attaching new audio to a note that already has some always asks first, and offers to use a fresh note instead. A capture interrupted by a crash or a dying system-audio stream is salvaged and recovered on next launch.
 - **Live markdown editor** — headings, bullets, bold/italic/code render as you type; Return continues lists, Tab/⇧Tab indent, ⌘Z undo.
 - **AI notes anchored on yours** — transcription with speaker identification (it knows your name from Settings), then note synthesis that preserves your manual notes (spelling/grammar corrected) and expands around them. Adjustable succinctness (5-level slider), fully editable prompts, editable results with live diff coloring. Stop button to cancel mid-run.
+- **Automatic mode** — one checkbox in Settings and Dosa transcribes and generates the moment you stop a recording, with no Generate Notes press. Because that can finish while you're in another note or another app, Dosa tells you when the notes are ready: an in-app message when Dosa is frontmost, a macOS notification when it isn't (click it to jump to the note). Back-to-back recordings queue up and run in order.
 - **Full transcript** — speaker-labeled, timestamped, viewable in a popup and exportable.
 - **Organization** — nested folders, drag & drop (into and out of folders), multi-select (⌘/⇧-click), pinning with a dedicated Pinned section, swipe gestures (right = pin, left = delete), 30-day trash.
 - **Search** — global (⌘K) across titles, notes, Dosa notes, and transcripts with filter chips; in-note search (⌘F); results jump to and flash the exact match.
@@ -45,7 +46,8 @@ Installing is opt-in: `--install` quits any running copy, then replaces `/Applic
 
    With keys for multiple providers saved, the **Default Provider** picker at the top of the section chooses which one generates notes. Neither Anthropic nor DeepSeek accepts audio, so transcription uses whatever is set in Settings → Transcription (a Gemini key is needed only if that's Gemini (Cloud)).
 3. **Your name** — Settings → Profile, so transcripts label your voice correctly.
-4. **Notion (optional)** — Settings → Notion → Connect; approve in the browser and Dosa sets up the rest.
+4. **Automatic mode (optional)** — Settings → Automatic Mode, to transcribe and generate as soon as a recording stops instead of pressing Generate Notes each time. Off by default, and it stays off in practice until an API key is saved.
+5. **Notion (optional)** — Settings → Notion → Connect; approve in the browser and Dosa sets up the rest.
 
 ## Keyboard shortcuts
 

@@ -9,8 +9,25 @@ enum AppSettings {
     static let themeKey = "themeName"
     static let accentOverrideKey = "accentOverride"
     static let notificationsEnabledKey = "notificationsEnabled"
+    static let automaticModeKey = "automaticMode"
 
     static var notificationsEnabled: Bool { bool(forKey: notificationsEnabledKey, default: true) }
+
+    /// Off by default: the shipped behavior is that nothing runs until the user
+    /// presses Generate Notes.
+    static var automaticModeEnabled: Bool { bool(forKey: automaticModeKey, default: false) }
+
+    /// Automatic mode *and* the credentials a run would need — mirroring the two
+    /// key checks inside `GenerationManager.run`. The stop toast's wording and the
+    /// enqueue guard both read this one property so they can never disagree: a
+    /// toast promising "transcribing…" when no key is configured is worse than no
+    /// toast at all.
+    static var automaticModeWillRun: Bool {
+        guard automaticModeEnabled else { return false }
+        guard !storedAPIKey(for: currentProvider).isEmpty else { return false }
+        if resolvedTranscriptionEngine == .gemini, storedAPIKey(for: "Gemini").isEmpty { return false }
+        return true
+    }
 
     /// Mirrors currentVerbosity's unset guard — UserDefaults returns a zero
     /// value for an unset key, which would wrongly treat "never set" as off.

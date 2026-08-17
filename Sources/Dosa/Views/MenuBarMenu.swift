@@ -15,7 +15,12 @@ struct MenuBarMenu: View {
         }
         if recorder.isRecording {
             Button("Stop Recording") {
-                RecordingCommand.stop(recorder: recorder, store: store, notifier: notifier)
+                RecordingCommand.stop(
+                    recorder: recorder,
+                    store: store,
+                    generator: generator,
+                    notifier: notifier
+                )
             }
         } else {
             Button("Start Recording in New Note") {

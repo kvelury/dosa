@@ -8,6 +8,7 @@ final class NotificationManager: NSObject, ObservableObject {
         case recordingSaved(noteId: UUID, title: String)
         case recordingImported(noteId: UUID, title: String, fileName: String)
         case notesReady(noteId: UUID, title: String)
+        case notesFailed(noteId: UUID, title: String)
     }
 
     /// The in-app message shown when Dosa is frontmost. Replaces NoteEditorView's
@@ -93,7 +94,8 @@ final class NotificationManager: NSObject, ObservableObject {
 extension NotificationManager.Event {
     var noteId: UUID {
         switch self {
-        case .recordingSaved(let id, _), .recordingImported(let id, _, _), .notesReady(let id, _):
+        case .recordingSaved(let id, _), .recordingImported(let id, _, _),
+             .notesReady(let id, _), .notesFailed(let id, _):
             return id
         }
     }
@@ -102,12 +104,14 @@ extension NotificationManager.Event {
         switch self {
         case .recordingSaved, .recordingImported: return "Recording saved"
         case .notesReady: return "Notes ready"
+        case .notesFailed: return "Couldn't generate notes"
         }
     }
 
     var bannerBody: String {
         switch self {
-        case .recordingSaved(_, let title), .recordingImported(_, let title, _), .notesReady(_, let title):
+        case .recordingSaved(_, let title), .recordingImported(_, let title, _),
+             .notesReady(_, let title), .notesFailed(_, let title):
             return title
         }
     }
@@ -115,12 +119,18 @@ extension NotificationManager.Event {
     var toastText: String {
         switch self {
         case .recordingSaved:
-            return "Recording saved"
+            // Says so up front when automatic mode is about to take over, since
+            // the work then starts without the user asking for it.
+            return AppSettings.automaticModeWillRun ? "Recording saved — transcribing…" : "Recording saved"
         case .recordingImported(_, _, let fileName):
             guard Self.importLosesSpeakerLabels else { return "Imported \(fileName)" }
             return "Imported \(fileName) — on-device transcription can't separate speakers on imported files. Switch Transcription to Gemini in Settings for speaker names."
-        case .notesReady:
-            return "Notes ready"
+        case .notesReady(_, let title):
+            // Named, because in automatic mode the note that just finished is
+            // often not the one on screen.
+            return "Notes ready — \(title)"
+        case .notesFailed(_, let title):
+            return "Couldn't generate notes — \(title)"
         }
     }
 

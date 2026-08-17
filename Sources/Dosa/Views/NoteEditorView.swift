@@ -84,6 +84,12 @@ struct NoteEditorView: View {
             }
         }
         .onChange(of: appState.pendingNoteAction) { _, _ in consumePendingAction() }
+        // Automatic mode can finish while the user sits in the note. `onAppear`
+        // only covers opening it afterwards, so without this the notes land
+        // behind the My Notes tab with no sign anything happened.
+        .onChange(of: current.enhancedMarkdown) { _, markdown in
+            if markdown != nil { viewMode = .aiNotes }
+        }
         .overlay(alignment: .bottom) {
             floatingBar(current: current)
         }
@@ -611,15 +617,23 @@ struct NoteEditorView: View {
             && (current.recordingFileName != nil || current.transcript != nil)
     }
 
+    /// Generation errors are only this note's business. Automatic mode can fail a
+    /// note the user isn't looking at, and without the `errorNoteId` check that
+    /// error would open a sheet over an unrelated note — or, with no note open,
+    /// never be shown or cleared and then fire on the next note opened.
     private var errorPresented: Binding<Bool> {
         Binding(
-            get: { localError != nil || generator.errorMessage != nil },
+            get: {
+                localError != nil
+                    || (generator.errorMessage != nil && generator.errorNoteId == noteId)
+            },
             set: { presented in
                 if !presented {
                     localError = nil
                     localErrorDetail = nil
                     generator.errorMessage = nil
                     generator.errorDetail = nil
+                    generator.errorNoteId = nil
                 }
             }
         )
@@ -724,7 +738,12 @@ struct NoteEditorView: View {
     }
 
     private func stopRecording() {
-        RecordingCommand.stop(recorder: recorder, store: store, notifier: notifier) { error in
+        RecordingCommand.stop(
+            recorder: recorder,
+            store: store,
+            generator: generator,
+            notifier: notifier
+        ) { error in
             localError = error.localizedDescription
         }
     }
