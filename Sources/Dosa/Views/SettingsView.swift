@@ -19,6 +19,7 @@ private struct SettingsSnapshot: Codable {
     var notesPrompt: String?
     var transcriptPrompt: String?
     var notificationsEnabled: Bool?
+    var automaticMode: Bool?
 }
 
 struct SettingsView: View {
@@ -34,6 +35,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
     @AppStorage(AppSettings.notificationsEnabledKey) private var notificationsEnabled = true
+    @AppStorage(AppSettings.automaticModeKey) private var automaticMode = false
     @AppStorage(AppSettings.apiKeyKey) private var apiKey = ""
     @AppStorage(AppSettings.modelKey) private var model = AppSettings.defaultModel
     @AppStorage(AppSettings.llmProviderKey) private var defaultProvider = "Gemini"
@@ -313,6 +315,19 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 6)
                     }
+                }
+
+                Section {
+                    Toggle("Transcribe and generate notes automatically", isOn: $automaticMode)
+                } header: {
+                    Text("Automatic Mode")
+                } footer: {
+                    Text("As soon as you stop a recording, Dosa transcribes it and generates notes — no need to press Generate Notes. Because this can finish while you're in another note or another app, Dosa tells you when the notes are ready with an in-app message or a notification.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 notionSection
@@ -620,7 +635,8 @@ struct SettingsView: View {
             dosaNotesColor: dosaColor,
             notesPrompt: notesPrompt,
             transcriptPrompt: transcriptPrompt,
-            notificationsEnabled: notificationsEnabled
+            notificationsEnabled: notificationsEnabled,
+            automaticMode: automaticMode
         )
         do {
             let encoder = JSONEncoder()
@@ -658,6 +674,7 @@ struct SettingsView: View {
             if let value = snapshot.notesPrompt { notesPrompt = value }
             if let value = snapshot.transcriptPrompt { transcriptPrompt = value }
             if let value = snapshot.notificationsEnabled { notificationsEnabled = value }
+            if let value = snapshot.automaticMode { automaticMode = value }
             AppSettings.applyAppearance()
             backupStatus = "Settings imported from \(url.lastPathComponent)."
         } catch {

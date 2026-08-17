@@ -88,6 +88,7 @@ struct DosaApp: App {
                 store: store,
                 appState: appState,
                 recorder: recorder,
+                generator: generator,
                 notifier: notifier
             )
             // Settings is a sheet, not a Settings scene, so the standard app-menu
