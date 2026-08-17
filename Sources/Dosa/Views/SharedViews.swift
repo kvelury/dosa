@@ -434,59 +434,39 @@ struct NotesStyleSlider: View {
 /// and the pane is showing anything other than that recording's own note. ⌘R can
 /// start a capture from anywhere, and every other on-screen trace lives in the
 /// floating bar, which unmounts the moment you leave the note. Not dismissible —
-/// dismissing it would recreate the problem.
+/// dismissing it would recreate the problem. The whole capsule is the hit target
+/// back to the recording's note.
 struct RecordingAwayToast: View {
     let elapsed: TimeInterval
     let ringPhase: Int
-    let noteExists: Bool
     let onGoBack: () -> Void
 
     private var shape: Capsule { Capsule() }
 
     var body: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(.red)
-                    .frame(width: 7, height: 7)
-                HStack(spacing: 0) {
-                    Text("Recording")
-                    AnimatedEllipsis(ringPhase: ringPhase)
-                }
-                Text(TimeFormatting.clock(elapsed))
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Circle()
+                .fill(.red)
+                .frame(width: 7, height: 7)
+            HStack(spacing: 0) {
+                Text("Recording")
+                AnimatedEllipsis(ringPhase: ringPhase)
             }
-            .font(.callout)
-
-            if noteExists {
-                Button(action: onGoBack) {
-                    Text("Go back to note")
-                        .font(.callout)
-                        .underline()
-                        .foregroundStyle(Theme.current.accentColor)
-                }
-                .buttonStyle(.plain)
-            }
+            Text(TimeFormatting.clock(elapsed))
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 10)
+        .font(.callout)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
         .floatingChrome(in: shape)
         .overlay(shape.strokeBorder(.red, lineWidth: 1.5))
         .fixedSize()
-        .frame(maxWidth: 340)
-        .onTapGesture {
-            guard noteExists else { return }
-            onGoBack()
-        }
+        .contentShape(shape)
+        .onTapGesture(perform: onGoBack)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityAddTraits(.updatesFrequently)
-    }
-
-    private var accessibilityLabel: String {
-        let status = "Recording, \(TimeFormatting.spoken(elapsed))"
-        return noteExists ? "\(status). Go back to note." : status
+        .accessibilityLabel("Recording, \(TimeFormatting.spoken(elapsed)). Go back to note.")
+        .accessibilityAddTraits([.isButton, .updatesFrequently])
     }
 }
 

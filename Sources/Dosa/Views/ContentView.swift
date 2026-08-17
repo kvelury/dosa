@@ -65,7 +65,6 @@ struct ContentView: View {
                         RecordingAwayToast(
                             elapsed: recorder.elapsed,
                             ringPhase: recorder.ringPhase,
-                            noteExists: store.note(id: id) != nil,
                             onGoBack: { appState.selectedNoteIds = [id] }
                         )
                         .transition(.move(edge: .top).combined(with: .opacity))

@@ -429,29 +429,26 @@ unmounts the moment you leave the note. Whenever `AudioRecorder.isRecording` is 
 pane is showing anything other than that recording's own note (`recordingNoteId !=
 AppState.singleSelectedNoteId`; Welcome and multi-select both have a nil single selection, so both
 show it), `ContentView` draws a persistent `RecordingAwayToast`: "Recording…" plus the live elapsed
-clock, and a "Go back to note" link. It is not dismissible. Gate on `isRecording` first — `finish`
-clears that before `recordingNoteId`, so the toast leaves the instant Stop is pressed.
+clock. Clicking the capsule selects the recording's note. It is not dismissible. Gate on
+`isRecording` first — `finish` clears that before `recordingNoteId`, so the toast leaves the instant
+Stop is pressed.
 
 It is a toast, not a banner: `.overlay(alignment: .top)` on the detail `Group`, same slot as the
-transient toast, and a `Capsule()` matching that toast's shape. A `safeAreaInset` was considered and
-rejected — the note title is leading-aligned and the toast is centered, so they sit side by side.
-Both toasts share one overlay `VStack` so they can never draw on top of each other; the recording
-toast is first (on top) so a transient "recording saved" / "notes ready" message never shoves it
-down. `.padding(.top, 10)` sits on that `VStack` (not on each toast) to keep the stack clear of the
-hidden titlebar (§9b). The overlay stays after `.id(themeRefreshTick)` and before `SetupBannerInset`,
-so a theme refresh doesn't flicker it and the setup banner pushes both toasts down.
-
-Horizontal padding is 22 pt, not the transient toast's 14: two lines plus vertical padding make the
-card ≈ 54 pt tall, so a `Capsule`'s end radius is ≈ 27 pt and 14 pt would crowd the curve. Do not
-tidy this back to 14 without changing the height.
+transient toast, and a `Capsule()` matching that toast's shape and padding (14×8). A `safeAreaInset`
+was considered and rejected — the note title is leading-aligned and the toast is centered, so they
+sit side by side. Both toasts share one overlay `VStack` so they can never draw on top of each
+other; the recording toast is first (on top) so a transient "recording saved" / "notes ready"
+message never shoves it down. `.padding(.top, 10)` sits on that `VStack` (not on each toast) to keep
+the stack clear of the hidden titlebar (§9b). The overlay stays after `.id(themeRefreshTick)` and
+before `SetupBannerInset`, so a theme refresh doesn't flicker it and the setup banner pushes both
+toasts down.
 
 The red 1.5 pt border is `.overlay(shape.strokeBorder(.red, lineWidth: 1.5))` *on top of*
 `floatingChrome`, not a colour on the chrome itself — chrome has no colour parameter, and the
 macOS 26 glass branch draws no stroke, so only an overlay lands in both branches. The red is
-SwiftUI's system `.red` (destructive red is not themeable, §8). The link is an underlined
-`.callout` `.buttonStyle(.plain)` `Text` in `Theme.current.accentColor` — same size as the
-status line; `.plain` is still a system style and draws no competing chrome (§9c above). The colour is themeable (and follows Accent Override) on
-purpose; the border's `.red` is not. Do not tint the border to match the link.
+SwiftUI's system `.red` (destructive red is not themeable, §8). There is no visible link; the whole
+capsule is the hit target (`.contentShape` + `.onTapGesture`), so it does not introduce a second
+chrome-bearing control inside the glass.
 
 The ellipsis is not its own timer. `AudioRecorder.ringPhase` already ticks 0→23 on the 0.09 s
 recording timer; `AnimatedEllipsis` derives three opacity states from `ringPhase / 8`, and Reduce
