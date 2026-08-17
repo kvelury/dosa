@@ -7,6 +7,7 @@ Because audio is intercepted at the OS level (not via meeting-platform APIs), it
 ## Features
 
 - **OS-level recording** — microphone via `AVAudioEngine` + system audio via ScreenCaptureKit loopback, mixed to a single `.m4a`. Live waveform feedback while recording; playback with a scrub bar.
+- **Recording stays visible when you navigate away** — a persistent toast keeps the elapsed clock in view; click it to return to the note that owns the capture. ⌘R still starts and stops from anywhere.
 - **Import audio & video** — drop a file onto a note, or use ⌘O / the sidebar `+` / the ⋯ menu. Anything AVFoundation can decode works — `.mp3`, `.m4a`, `.wav`, `.aiff`, `.flac`, `.aac`, `.caf`, and video containers like `.mp4`, `.mov`, `.m4v`, whose audio track is extracted automatically. Everything is transcoded to `.m4a`, so an imported file behaves exactly like a recording from there on: transcribe, generate, play back, export.
 - **Recordings can't be clobbered** — every recording gets its own never-reused filename, so no import, re-record, or crash recovery can write over audio that already exists. Attaching new audio to a note that already has some always asks first, and offers to use a fresh note instead. A capture interrupted by a crash or a dying system-audio stream is salvaged and recovered on next launch.
 - **Live markdown editor** — headings, bullets, bold/italic/code render as you type; Return continues lists, Tab/⇧Tab indent, ⌘Z undo.

@@ -28,6 +28,16 @@ struct ContentView: View {
         return appState.selectedNoteIds.count > 1
     }
 
+    /// The recording's note id when the detail pane is showing anything else.
+    /// Welcome and multi-select both have a nil `singleSelectedNoteId`, so both
+    /// show the toast. Gated on `isRecording` first because `finish` clears that
+    /// before `recordingNoteId`, and the toast should leave the instant Stop is
+    /// pressed rather than after mixdown.
+    private var awayFromRecording: UUID? {
+        guard recorder.isRecording, let id = recorder.recordingNoteId else { return nil }
+        return id == appState.singleSelectedNoteId ? nil : id
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(selectedNoteIds: $appState.selectedNoteIds)
@@ -50,15 +60,26 @@ struct ContentView: View {
             }
             .id(appState.themeRefreshTick)
             .overlay(alignment: .top) {
-                if let toast = notifier.toast {
-                    Text(toast)
-                        .font(.callout)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .floatingChrome(in: Capsule())
-                        .padding(.top, 10)
+                VStack(spacing: 8) {
+                    if let id = awayFromRecording {
+                        RecordingAwayToast(
+                            elapsed: recorder.elapsed,
+                            ringPhase: recorder.ringPhase,
+                            onGoBack: { appState.selectedNoteIds = [id] }
+                        )
                         .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    if let toast = notifier.toast {
+                        Text(toast)
+                            .font(.callout)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .floatingChrome(in: Capsule())
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
+                .padding(.top, 10)
+                .animation(.default, value: awayFromRecording)
             }
             .modifier(SetupBannerInset(onOpenSettings: { appState.showSettings = true }))
             // Hides the toolbar's material/separator, not the toolbar itself, so

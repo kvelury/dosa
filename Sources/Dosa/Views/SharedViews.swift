@@ -105,9 +105,10 @@ private func setupBannerMessage(
     }
 }
 
-/// Chrome for the overlays that float above the editor — the recording bar and the
-/// toast. macOS 26 draws them in Liquid Glass; earlier releases keep the material +
-/// hairline + shadow recipe those overlays shipped with.
+/// Chrome for the overlays that float above the editor — the recording bar, the
+/// recording-away toast, and the transient event toast. macOS 26 draws them in
+/// Liquid Glass; earlier releases keep the material + hairline + shadow recipe
+/// those overlays shipped with.
 ///
 /// Only for glass the app draws *over content*. Toolbar items get the system's own
 /// Liquid Glass and must not be given this as well — see §9c.
@@ -123,7 +124,7 @@ struct FloatingChrome<S: InsettableShape>: ViewModifier {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             // Never `.interactive()`. That is for glass which is itself one
-            // button; both surfaces left here are containers holding their own
+            // button; the surfaces left here are containers holding their own
             // controls, and it would light the whole thing up whenever the
             // pointer neared any of them. The one control that did want it —
             // the ⋯ pill — is a toolbar item now and gets the system's.
@@ -426,6 +427,65 @@ struct NotesStyleSlider: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Persistent toast at the top of the detail pane whenever a recording is running
+/// and the pane is showing anything other than that recording's own note. ⌘R can
+/// start a capture from anywhere, and every other on-screen trace lives in the
+/// floating bar, which unmounts the moment you leave the note. Not dismissible —
+/// dismissing it would recreate the problem. The whole capsule is the hit target
+/// back to the recording's note.
+struct RecordingAwayToast: View {
+    let elapsed: TimeInterval
+    let ringPhase: Int
+    let onGoBack: () -> Void
+
+    private var shape: Capsule { Capsule() }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(.red)
+                .frame(width: 7, height: 7)
+            HStack(spacing: 0) {
+                Text("Recording")
+                AnimatedEllipsis(ringPhase: ringPhase)
+            }
+            Text(TimeFormatting.clock(elapsed))
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .floatingChrome(in: shape)
+        .overlay(shape.strokeBorder(.red, lineWidth: 1.5))
+        .fixedSize()
+        .contentShape(shape)
+        .onTapGesture(perform: onGoBack)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Recording, \(TimeFormatting.spoken(elapsed)). Go back to note.")
+        .accessibilityAddTraits([.isButton, .updatesFrequently])
+    }
+}
+
+/// Three dots whose opacity follows `AudioRecorder.ringPhase`, so the ellipsis
+/// animates without its own timer and stops the instant recording does.
+/// All three glyphs stay laid out; only opacity changes, so the clock never shifts.
+private struct AnimatedEllipsis: View {
+    let ringPhase: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 24 ring frames ÷ 8 = three dot states per ring revolution, ~0.72 s each.
+    private var lit: Int { reduceMotion ? 3 : (ringPhase / 8) % 3 + 1 }
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ForEach(0..<3, id: \.self) { i in
+                Text(".").opacity(i < lit ? 1 : 0.15)
+            }
+        }
     }
 }
 
