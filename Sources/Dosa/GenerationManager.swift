@@ -209,7 +209,9 @@ final class GenerationManager: ObservableObject {
             let template = AppSettings.string(
                 forKey: AppSettings.notesPromptKey, default: AppSettings.defaultNotesPrompt
             )
-            let prompt = template
+            let templateContext = TemplateStore.shared.promptContext(for: latest)
+            let prompt = withTemplateContext(template, context: templateContext)
+                .replacingOccurrences(of: "{{template_context}}", with: templateContext)
                 .replacingOccurrences(of: "{{verbosity}}", with: AppSettings.verbosityInstruction(level: AppSettings.currentVerbosity))
                 .replacingOccurrences(of: "{{user_name}}", with: resolvedName)
                 .replacingOccurrences(of: "{{title}}", with: latest.displayTitle)
@@ -262,6 +264,15 @@ final class GenerationManager: ObservableObject {
         guard automatic else { return }
         let title = store.note(id: noteId)?.displayTitle ?? "Untitled Note"
         notifier.post(.notesFailed(noteId: noteId, title: title))
+    }
+
+    /// Users who customized their prompt before templates existed have no
+    /// {{template_context}} placeholder in it; without this their templates would
+    /// silently steer nothing. Prepended rather than appended because appending would
+    /// bury the instruction behind a transcript that can run to tens of thousands of tokens.
+    private func withTemplateContext(_ template: String, context: String) -> String {
+        guard !template.contains("{{template_context}}") else { return template }
+        return "Note type:\n\(context)\n\n\(template)"
     }
 
     /// The title and date already live in the note header, so drop a leading

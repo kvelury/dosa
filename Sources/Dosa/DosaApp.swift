@@ -61,6 +61,7 @@ struct DosaApp: App {
     static let mainWindowID = "main"
 
     @StateObject private var store = NotesStore()
+    @StateObject private var templates = TemplateStore.shared
     @StateObject private var recorder = AudioRecorder()
     @StateObject private var player = AudioPlayer()
     @StateObject private var generator = GenerationManager()
@@ -73,6 +74,7 @@ struct DosaApp: App {
         Window("Dosa", id: Self.mainWindowID) {
             ContentView()
                 .environmentObject(store)
+                .environmentObject(templates)
                 .environmentObject(recorder)
                 .environmentObject(player)
                 .environmentObject(generator)
@@ -130,6 +132,7 @@ struct DosaApp: App {
         MenuBarExtra {
             MenuBarMenu()
                 .environmentObject(store)
+                .environmentObject(templates)
                 .environmentObject(appState)
                 .environmentObject(recorder)
                 .environmentObject(generator)

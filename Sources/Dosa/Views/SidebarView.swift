@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @EnvironmentObject private var store: NotesStore
+    @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var appState: AppState
     @Binding var selectedNoteIds: Set<UUID>
 
@@ -51,6 +52,17 @@ struct SidebarView: View {
                         Button("Import Audio or Video…") {
                             importIntoNewNote(folderId: nil)
                         }
+                        if !templates.templates.isEmpty {
+                            Divider()
+                            Section("Templates") {
+                                ForEach(templates.templates) { template in
+                                    Button(template.name) {
+                                        let note = store.createNote(template: template)
+                                        selectedNoteIds = [note.id]
+                                    }
+                                }
+                            }
+                        }
                     } label: {
                         Image(systemName: "chevron.down")
                             .resizable()
@@ -61,7 +73,7 @@ struct SidebarView: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("Import audio or video")
+                    .help("New note from a template, or import audio")
                 }
             }
             .buttonStyle(.borderless)
