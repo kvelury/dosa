@@ -24,6 +24,12 @@ struct Note: Identifiable, Codable, Hashable {
     /// note, for display next to the "your notes / dosa additions" legend.
     var generationModel: String?
     var generationStyle: String?
+    var templateId: UUID?
+    var templateName: String?
+    /// The template body as it was when applied. Lets generation tell scaffolding the user
+    /// never filled in from lines they actually wrote, and keeps the note readable
+    /// after the template is edited or deleted.
+    var templateSeed: String?
 
     var isPinned: Bool { pinnedAt != nil }
     var isDeleted: Bool { deletedAt != nil }

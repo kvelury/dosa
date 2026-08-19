@@ -20,11 +20,13 @@ private struct SettingsSnapshot: Codable {
     var transcriptPrompt: String?
     var notificationsEnabled: Bool?
     var automaticMode: Bool?
+    var noteTemplates: [NoteTemplate]?
 }
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var notion: NotionManager
     @EnvironmentObject private var notifier: NotificationManager
 
@@ -50,6 +52,7 @@ struct SettingsView: View {
     @State private var backupStatus: String?
     @State private var notesPromptExpanded = false
     @State private var transcriptPromptExpanded = false
+    @State private var expandedTemplateIds: Set<UUID> = []
     @State private var selectedTab = "Gemini"
 
     private static let providers = ["Gemini", "Anthropic", "OpenAI", "DeepSeek"]
@@ -132,6 +135,69 @@ struct SettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var templatesSection: some View {
+        Section {
+            ForEach($templates.templates) { $template in
+                DisclosureGroup(isExpanded: templateExpanded(template.id)) {
+                    TextField("Name", text: $template.name)
+                    Text("Sections prefilled into a new note")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    TextEditor(text: $template.body)
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(height: 140)
+                    Text("What the AI is told about this note type")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    TextEditor(text: $template.promptContext)
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(height: 120)
+                    HStack {
+                        if template.builtInKey != nil {
+                            Button("Reset to Default") {
+                                templates.resetToDefault(id: template.id)
+                            }
+                        }
+                        Spacer()
+                        if template.builtInKey == nil {
+                            Button("Delete", role: .destructive) {
+                                templates.delete(id: template.id)
+                            }
+                        }
+                    }
+                } label: {
+                    promptGroupLabel(template.name, isExpanded: templateExpanded(template.id))
+                }
+            }
+            HStack {
+                Button("Add Template") {
+                    let created = templates.add()
+                    expandedTemplateIds.insert(created.id)
+                }
+                Spacer()
+                Button("Restore Defaults") {
+                    templates.restoreDefaults()
+                }
+            }
+        } header: {
+            Text("Note Templates")
+        } footer: {
+            Text("Templates appear under Templates in the ＋ menu in the sidebar. Choosing one prefills the note with its sections and tells the AI what kind of conversation it is, so the generated notes match. {{user_name}} works inside a template's AI context.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -348,19 +414,29 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                templatesSection
+
                 Section {
                     DisclosureGroup(isExpanded: $notesPromptExpanded) {
                         TextEditor(text: $notesPrompt)
                             .font(.system(size: 11, design: .monospaced))
                             .frame(height: 180)
                         HStack {
-                            Text("Placeholders: {{title}}, {{date}}, {{user_name}}, {{verbosity}}, {{manual_notes}}, {{transcript}}")
+                            Text("Placeholders: {{title}}, {{date}}, {{user_name}}, {{verbosity}}, {{template_context}}, {{manual_notes}}, {{transcript}}")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Button("Reset to Default") {
                                 notesPrompt = AppSettings.defaultNotesPrompt
                             }
+                        }
+                        if !notesPrompt.contains("{{template_context}}") {
+                            Text("Your customized prompt doesn't include `{{template_context}}` — template guidance will be added at the top of the prompt instead. Reset to Default to place it inline.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     } label: {
                         promptGroupLabel("Note Generation Prompt", isExpanded: $notesPromptExpanded)
@@ -597,6 +673,19 @@ struct SettingsView: View {
         .help("\(name) theme")
     }
 
+    private func templateExpanded(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedTemplateIds.contains(id) },
+            set: { expanded in
+                if expanded {
+                    expandedTemplateIds.insert(id)
+                } else {
+                    expandedTemplateIds.remove(id)
+                }
+            }
+        )
+    }
+
     private func promptGroupLabel(_ title: String, isExpanded: Binding<Bool>) -> some View {
         HStack {
             Text(title)
@@ -636,7 +725,8 @@ struct SettingsView: View {
             notesPrompt: notesPrompt,
             transcriptPrompt: transcriptPrompt,
             notificationsEnabled: notificationsEnabled,
-            automaticMode: automaticMode
+            automaticMode: automaticMode,
+            noteTemplates: templates.templates
         )
         do {
             let encoder = JSONEncoder()
@@ -675,6 +765,7 @@ struct SettingsView: View {
             if let value = snapshot.transcriptPrompt { transcriptPrompt = value }
             if let value = snapshot.notificationsEnabled { notificationsEnabled = value }
             if let value = snapshot.automaticMode { automaticMode = value }
+            if let value = snapshot.noteTemplates, !value.isEmpty { templates.templates = value }
             AppSettings.applyAppearance()
             backupStatus = "Settings imported from \(url.lastPathComponent)."
         } catch {

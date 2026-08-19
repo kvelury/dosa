@@ -38,6 +38,7 @@ Sources/Dosa/
   Theme.swift            Preset palettes + accent override + styleFingerprint
   Models.swift           Note, Folder, TimeFormatting
   NotesStore.swift       Persistence, folders, pins, trash, stats
+  NoteTemplates.swift    NoteTemplate model, TemplateStore, four built-in templates
   AudioRecorder.swift    Mic + system-audio capture, m4a mixdown, level/menu-icon metering
   RecordingImporter.swift  File picker, format gate, and import error mapping
   AudioPlayer.swift      Playback with pause/seek/progress
@@ -115,6 +116,8 @@ struct Note {
   notionPageId: String?  notionPageURL: String?       // set on first Notion export
   pinnedAt: Date?                                     // nil = unpinned; ordering key
   deletedAt: Date?                                    // nil = active; drives 30-day trash
+  templateId: UUID?  templateName: String?            // templateName is stored redundantly so a rename/delete does not blank the editor legend
+  templateSeed: String?                               // scaffold snapshot at apply-time; generation uses it to drop unfilled headings that rule 1 would otherwise keep
 }
 ```
 
@@ -247,7 +250,9 @@ Pipeline per note: **transcribe (if no cached transcript) → generate**.
 
 ### 5.3 Prompt defaults (`AppSettings.swift`)
 
-The notes prompt implements the "bi-directional" architecture: manual notes are the anchor; rule 1 = include them **with only spelling/grammar corrected**; rule 3 = fixed sections (Summary ≤3 sentences, Key Points, Decisions, Action Items as checkboxes) + omit empty sections + model may add sections for topics that don't fit; rule 4 = `{{verbosity}}`; rule 6 = never repeat title/date, start at `## Summary`; rule 7 = formatting contract (dash bullets, sparse bold, no italics, no bare `*`).
+The notes prompt implements the "bi-directional" architecture: manual notes are the anchor; rule 1 = include them **with only spelling/grammar corrected**; rule 3 = use the sections named under "Note type" (`{{template_context}}`) + omit empty sections + model may add sections for topics that don't fit; rule 4 = `{{verbosity}}`; rule 6 = never repeat title/date, start at the first section heading; rule 7 = formatting contract (dash bullets, sparse bold, no italics, no bare `*`).
+
+`{{template_context}}` is substituted **before** `{{user_name}}`, because the two interview templates embed `{{user_name}}` in their own prompt context ("a job interview that {{user_name}} is conducting" vs "in which {{user_name}} is the candidate"). Reverse that order and both ship with a raw `{{user_name}}` and start reading alike. Untemplated notes get `TemplateStore.defaultContext` (the old rule-3 section list, verbatim). If a stored custom prompt has no `{{template_context}}` placeholder, `withTemplateContext` **prepends** a `Note type:` block rather than appending — a transcript can run to tens of thousands of tokens and would bury an appended instruction. Settings shows a caption when that fallback is active.
 
 ---
 
@@ -577,7 +582,7 @@ Per-note sync toggle (data-source destinations only); push = debounced `replace_
 
 ## 11. Settings (`SettingsView.swift`)
 
-Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Automatic Mode** (one toggle → `automaticMode`, default off; §5.2) → **Notion** (§10) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Notifications** (§11b) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
+Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Automatic Mode** (one toggle → `automaticMode`, default off; §5.2) → **Notion** (§10) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Templates** (DisclosureGroup per template; built-ins Interview (Hiring) / Interview (Job Search) / 1:1 / Team Meeting plus user-created; Add Template / Restore Defaults; stored in UserDefaults `noteTemplates`) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Notifications** (§11b) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
 
 - **Model and Notes Style are also reachable from the recording bar's quick-settings tab** (§9d),
   which writes the same UserDefaults keys through `@AppStorage` — the two views stay in lockstep in
@@ -587,7 +592,7 @@ Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) �
   be stored and never used. `AppSettings.availableModels(for:)` / `modelStorageKey(for:)` are the
   single provider-keyed lookups both views go through.
 - **Automatic Mode** gates itself on more than its own toggle: `AppSettings.automaticModeWillRun` also requires the credentials a run would need, mirroring `run`'s own two key checks. Both the enqueue guard and the "Recording saved — transcribing…" toast read that single property, so the toast can never promise work that will not happen.
-- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt, notificationsEnabled, automaticMode). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models. `notificationsEnabled` and `automaticMode` are Optional so older exported JSON still decodes.
+- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt, notificationsEnabled, automaticMode, noteTemplates). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models. `notificationsEnabled`, `automaticMode`, and `noteTemplates` are Optional so older exported JSON still decodes.
 - Closing Settings bumps `themeRefreshTick` (§8).
 
 > **CALLOUT — Form footer text on macOS 26 right-aligns wrapped lines** unless you add `.multilineTextAlignment(.leading)` (plus `.fixedSize(horizontal: false, vertical: true)` and a leading-aligned max-width frame). All footers here do this; keep the pattern for new ones. Similarly, a bare `Slider` or segmented `Picker` in a grouped Form gets shoved into the trailing "value column" (provider tabs hug the leading edge) — give it a hidden empty label + `.frame(maxWidth: .infinity)`.
