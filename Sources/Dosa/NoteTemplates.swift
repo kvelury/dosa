@@ -8,8 +8,10 @@ struct NoteTemplate: Identifiable, Codable, Hashable {
     var body: String
     /// Instructions substituted into the generation prompt's `{{template_context}}`.
     var promptContext: String
-    /// Non-nil for the four shipped templates. Drives "Reset to Default" and keeps
-    /// built-ins undeletable; nil means the user created this one.
+    /// Non-nil for the four shipped templates. Drives "Reset to Default" and lets
+    /// "Restore Defaults" find a shipped template again after it was edited or
+    /// deleted; nil means the user created this one. It confers no protection —
+    /// built-ins are deletable like any other template.
     var builtInKey: String?
 }
 
@@ -23,11 +25,18 @@ final class TemplateStore: ObservableObject {
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: AppSettings.noteTemplatesKey),
-           let decoded = try? JSONDecoder().decode([NoteTemplate].self, from: data),
-           !decoded.isEmpty {
+           let decoded = try? JSONDecoder().decode([NoteTemplate].self, from: data) {
+            // An empty array is a real stored state now that built-ins can be
+            // deleted — "I removed every template" has to survive a relaunch
+            // rather than silently resurrecting the four shipped ones.
             templates = decoded
         } else {
             templates = Self.builtIns
+            // Persisted immediately because `builtIns` mints fresh UUIDs on every
+            // launch: without this, a note created from a built-in would lose its
+            // templateId match — and with it the template's prompt context — the
+            // next time the app started.
+            persist()
         }
     }
 
@@ -47,8 +56,9 @@ final class TemplateStore: ObservableObject {
         return template
     }
 
+    /// Deletes any template, shipped or user-made. A deleted built-in comes back
+    /// through "Restore Defaults", which is why this needs no confirmation step.
     func delete(id: UUID) {
-        guard templates.first(where: { $0.id == id })?.builtInKey == nil else { return }
         templates.removeAll { $0.id == id }
     }
 
@@ -76,27 +86,45 @@ final class TemplateStore: ObservableObject {
     }
 
     func promptContext(for note: Note) -> String {
-        guard let template = template(id: note.templateId) else {
-            return Self.defaultContext
+        var context = Self.defaultContext
+        if let template = template(id: note.templateId) {
+            context = template.promptContext
+            let seed = note.templateSeed ?? ""
+            if !seed.isEmpty {
+                context += """
+
+
+                The user's manual notes started from this template scaffold:
+                ---
+                \(seed)
+                ---
+                Headings from that scaffold with nothing written under them are empty structure, not content \
+                the user wrote — drop those sections rather than preserving them. Rule 1's requirement to keep \
+                the user's lines verbatim applies only to text they actually added.
+                """
+            }
         }
-        let seed = note.templateSeed ?? ""
-        guard !seed.isEmpty else { return template.promptContext }
-        return template.promptContext + """
-
-
-        The user's manual notes started from this template scaffold:
-        ---
-        \(seed)
-        ---
-        Headings from that scaffold with nothing written under them are empty structure, not content \
-        the user wrote — drop those sections rather than preserving them. Rule 1's requirement to keep \
-        the user's lines verbatim applies only to text they actually added.
-        """
+        return context + "\n\n" + Self.objectivityRule
     }
 
     static let defaultContext = """
     This is a general meeting note. Use these sections: "## Summary" (2-3 sentences max), \
     "## Key Points", "## Decisions", and "## Action Items" (as a checkbox list).
+    """
+
+    /// Appended to every note's context by `promptContext(for:)` — templated or not,
+    /// shipped template or user-written one. Deliberately kept out of the editable
+    /// template text: a template's job is to supply structure and context, and no
+    /// template (or edit to one) should be able to turn a record of what was said
+    /// into a verdict on it. Living here also means the rule reaches templates that
+    /// were stored before it existed, which a change to `builtIns` alone would not.
+    static let objectivityRule = """
+    Whatever those sections are called, the notes are a factual record, not an evaluation. Do not \
+    rate, score, grade, or conclude anything of your own, and do not comment on how the conversation \
+    went or on how anyone performed. A section that asks for an assessment — strengths, concerns, \
+    signals, a recommendation — may only carry assessments a participant actually made out loud or \
+    that the user wrote in their manual notes, attributed to whoever made them. If there are none, \
+    omit that section rather than supplying your own.
     """
 
     static let builtIns: [NoteTemplate] = [
@@ -122,16 +150,17 @@ final class TemplateStore: ObservableObject {
             """,
             promptContext: """
             This is a job interview that {{user_name}} is conducting — they are the interviewer, \
-            recruiting for a role, and the other participant is the candidate. Organize the notes around \
-            evaluating that candidate. Use these sections: "## Candidate & Role" (a short bullet list — \
-            candidate, role, interviewers), "## Background & Experience", "## Focus Area / Technical \
-            Discussion", "## Candidate's Questions" (what the candidate asked and how it was answered), \
-            "## Strengths" (each with a concrete example or the candidate's own words from the transcript), \
-            "## Concerns", and "## Recommendation". Attribute claims to the candidate rather than stating \
-            them as fact — write "said they led the migration", not "led the migration". Capture specifics: \
-            projects, numbers, technologies, timelines. Under "## Recommendation" record only a verdict the \
-            interviewer actually stated; if they did not state one, omit the section rather than inventing a \
-            hire/no-hire call.
+            recruiting for a role, and the other participant is the candidate. Use these sections: \
+            "## Candidate & Role" (a short bullet list — candidate, role, interviewers), \
+            "## Background & Experience", "## Focus Area / Technical Discussion", "## Candidate's \
+            Questions" (what the candidate asked and how it was answered), "## Strengths", \
+            "## Concerns", and "## Recommendation". Attribute claims to the candidate rather than \
+            stating them as fact — write "said they led the migration", not "led the migration". \
+            Capture specifics: projects, numbers, technologies, timelines. The last three sections are \
+            the interviewer's call, not yours: fill "## Strengths", "## Concerns", and \
+            "## Recommendation" only from what {{user_name}} wrote in their manual notes or said in the \
+            transcript, and drop any of them they left empty. Never add a strength, a concern, or a \
+            hire/no-hire verdict of your own.
             """,
             builtInKey: "interviewHiring"
         ),
@@ -149,7 +178,7 @@ final class TemplateStore: ObservableObject {
 
             ## Questions I Asked
 
-            ## Signals — Good & Bad
+            ## Signals
 
             ## Follow-ups
             - [ ]
@@ -160,11 +189,12 @@ final class TemplateStore: ObservableObject {
             and the role, and what they need to do next. Use these sections: "## Company & Role" (a short \
             bullet list — company, role, interviewers), "## What They Told Me" (about the team, the work, \
             the process, compensation, timelines), "## Questions I Was Asked" (each with a brief note on how \
-            the user answered), "## Questions I Asked" (and the answers given), "## Signals — Good & Bad" \
-            (concrete things said or done that are encouraging or concerning — never vibes or inference), \
-            and "## Follow-ups" (a checkbox list: thank-you notes, materials to send, things to research, \
-            dates to chase). Attribute statements about the company to whoever made them. Do NOT grade the \
-            user's own performance or add encouragement — record what was said, not how well you think it went.
+            the user answered), "## Questions I Asked" (and the answers given), "## Signals" (only things \
+            {{user_name}} themselves flagged as encouraging or concerning in their manual notes — quote the \
+            transcript line that goes with each, and drop the section if they flagged nothing), and \
+            "## Follow-ups" (a checkbox list: thank-you notes, materials to send, things to research, dates \
+            to chase). Attribute statements about the company to whoever made them. Do not grade the user's \
+            performance, add encouragement, or say anything about how the interview went.
             """,
             builtInKey: "interviewJobSearch"
         ),
@@ -183,13 +213,14 @@ final class TemplateStore: ObservableObject {
             - [ ]
             """,
             promptContext: """
-            This is a 1:1 between a manager and their direct report. Keep it personal and candid. Use these \
-            sections: "## Wins Since Last Time", "## What's Blocking", "## Feedback" (in both directions — \
-            note who gave it to whom), "## Career & Growth", and "## Action Items" (a checkbox list, each \
-            item with an owner). Record how someone framed something when they said it plainly — \
-            frustration, excitement, being stretched thin — because that is the substance of a 1:1, but \
-            never speculate about how anyone felt. Keep sensitive topics (compensation, performance, \
-            personal circumstances) factual and free of editorializing.
+            This is a 1:1 between a manager and their direct report. Use these sections: "## Wins Since \
+            Last Time", "## What's Blocking", "## Feedback" (in both directions — note who gave it to \
+            whom), "## Career & Growth", and "## Action Items" (a checkbox list, each item with an owner). \
+            Where someone said plainly how they felt — frustrated, excited, stretched thin — record it as \
+            their own statement, attributed to them, because that is the substance of a 1:1. Never infer a \
+            mood no one named, and never characterize the state of the relationship or the conversation. \
+            Keep sensitive topics (compensation, performance, personal circumstances) factual and free of \
+            editorializing.
             """,
             builtInKey: "oneOnOne"
         ),
