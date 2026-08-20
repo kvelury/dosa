@@ -263,7 +263,9 @@ enum AppSettings {
     that does not fit into these sections.
     4. Length and depth: {{verbosity}}
     5. Be factual. Only use information found in the transcript or the manual notes. Never invent \
-    facts, and never pad with filler.
+    facts, and never pad with filler. Record what was said; never judge, rate, or editorialize. \
+    Opinions, impressions, and conclusions belong to the people in the meeting — attribute theirs, \
+    and add none of your own.
     6. Output pure Markdown with no code fences and no preamble. Do NOT repeat the meeting \
     title or date anywhere — the app already displays them above the notes. Begin directly \
     with the first section heading.

@@ -169,10 +169,8 @@ struct SettingsView: View {
                             }
                         }
                         Spacer()
-                        if template.builtInKey == nil {
-                            Button("Delete", role: .destructive) {
-                                templates.delete(id: template.id)
-                            }
+                        Button("Delete", role: .destructive) {
+                            templates.delete(id: template.id)
                         }
                     }
                 } label: {
@@ -192,7 +190,7 @@ struct SettingsView: View {
         } header: {
             Text("Note Templates")
         } footer: {
-            Text("Templates appear under Templates in the ＋ menu in the sidebar. Choosing one prefills the note with its sections and tells the AI what kind of conversation it is, so the generated notes match. {{user_name}} works inside a template's AI context.")
+            Text("Templates appear under Templates in the ＋ menu in the sidebar. Choosing one prefills the note with its sections and tells the AI what kind of conversation it is, so the generated notes match. {{user_name}} works inside a template's AI context. Any template can be deleted, built-in ones included — Restore Defaults brings the four shipped templates back. A template only sets structure and context: generated notes stay a factual record either way, and never score or pass judgement on a conversation.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.leading)
@@ -765,7 +763,10 @@ struct SettingsView: View {
             if let value = snapshot.transcriptPrompt { transcriptPrompt = value }
             if let value = snapshot.notificationsEnabled { notificationsEnabled = value }
             if let value = snapshot.automaticMode { automaticMode = value }
-            if let value = snapshot.noteTemplates, !value.isEmpty { templates.templates = value }
+            // No `!value.isEmpty` guard: with built-ins deletable, "no templates" is a
+            // state worth exporting and restoring. Older JSON without the field decodes
+            // to nil and is still skipped.
+            if let value = snapshot.noteTemplates { templates.templates = value }
             AppSettings.applyAppearance()
             backupStatus = "Settings imported from \(url.lastPathComponent)."
         } catch {
