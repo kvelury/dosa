@@ -43,6 +43,44 @@ cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/dosa-mark-light.png "$APP/Contents/Resources/dosa-mark-light.png"
 cp Resources/dosa-mark-dark.png "$APP/Contents/Resources/dosa-mark-dark.png"
 
+PLIST="$APP/Contents/Info.plist"
+
+# Stamp the *copy* inside the bundle, never Resources/Info.plist: that one is
+# tracked, and dirtying it on every build would trip the release guard below.
+# This must run BEFORE codesign — PlistBuddy after signing breaks the seal, and
+# UpdateManager verifies the signature of what it downloads.
+plist_set() {   # key type value
+    /usr/libexec/PlistBuddy -c "Add :$1 $2 $3" "$PLIST" >/dev/null 2>&1 \
+        || /usr/libexec/PlistBuddy -c "Set :$1 $3" "$PLIST"
+}
+
+BUILD_CHANNEL=dev
+[ "${DOSA_RELEASE_BUILD:-0}" = "1" ] && BUILD_CHANNEL=release
+
+COMMIT=""; COMMIT_DATE=""; DIRTY=false
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+    COMMIT=$(git rev-parse HEAD 2>/dev/null || true)
+    COMMIT_DATE=$(git show -s --format=%cI HEAD 2>/dev/null || true)
+    [ -n "$(git status --porcelain)" ] && DIRTY=true
+fi
+# Escape hatch: claim this build came from an older commit, so the updater can be
+# exercised end to end without waiting on CI. See "Verify" below.
+COMMIT="${DOSA_BUILD_COMMIT:-$COMMIT}"
+[ -z "$COMMIT_DATE" ] && COMMIT_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# A release artifact that cannot be traced to a commit is worse than a failed
+# build — this is the only place that invariant can be enforced.
+if [ "$BUILD_CHANNEL" = release ]; then
+    [ -n "$COMMIT" ] || { echo "==> DOSA_RELEASE_BUILD=1 but no git commit — refusing." >&2; exit 1; }
+    [ "$DIRTY" = false ] || { echo "==> DOSA_RELEASE_BUILD=1 with uncommitted changes — refusing." >&2; git status --short >&2; exit 1; }
+fi
+
+echo "==> Stamping build (${BUILD_CHANNEL}, ${COMMIT:-no-git})…"
+plist_set DosaBuildCommit  string "$COMMIT"
+plist_set DosaBuildDate    string "$COMMIT_DATE"
+plist_set DosaBuildChannel string "$BUILD_CHANNEL"
+plist_set DosaBuildDirty   bool   "$DIRTY"
+
 echo "==> Signing (ad-hoc)…"
 codesign --force --sign - "$APP"
 
