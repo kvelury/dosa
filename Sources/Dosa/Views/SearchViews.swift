@@ -23,7 +23,8 @@ struct GlobalSearchView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
+                    .accessibilityHidden(true)
                 TextField("Search all notes and transcripts", text: $query)
                     .textFieldStyle(.plain)
                     .appFont(.title3)
@@ -76,7 +77,7 @@ struct GlobalSearchView: View {
             Spacer()
             Text(message)
                 .appFont(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 400)
             Spacer()
@@ -119,7 +120,8 @@ struct NoteSearchView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
+                    .accessibilityHidden(true)
                 TextField("Search this note and transcript", text: $query)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
@@ -138,17 +140,17 @@ struct NoteSearchView: View {
             if enabledFields.isEmpty {
                 Text("Select at least one filter.")
                     .appFont(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if trimmedQuery.count < 2 {
                 Text("Type at least 2 characters.")
                     .appFont(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if results.isEmpty {
                 Text("No matches.")
                     .appFont(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(results) { match in
@@ -212,7 +214,7 @@ private struct SearchFieldToggle: View {
             HStack(spacing: 4) {
                 if isOn {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                 }
                 Text(field.rawValue)
                     .appFont(.caption, weight: .medium)
@@ -221,10 +223,13 @@ private struct SearchFieldToggle: View {
             .padding(.vertical, 4)
             .background(Capsule().fill(isOn ? Color.accentColor.opacity(0.16) : Color.clear))
             .overlay(Capsule().strokeBorder(isOn ? Color.accentColor.opacity(0.7) : Color.secondary.opacity(0.35)))
-            .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
+            // accent-on-accent-tint fails AA at 0.16 opacity — accentTextColor
+            // is the contrast-adjusted token, not the raw accent.
+            .foregroundStyle(isOn ? Theme.current.accentTextColor : Theme.secondaryTextColor)
         }
         .buttonStyle(.plain)
         .help(isOn ? "Exclude \(field.rawValue) from the search" : "Include \(field.rawValue) in the search")
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -246,12 +251,12 @@ struct SearchResultRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(.quaternary.opacity(0.6)))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
                 Spacer()
             }
             Text(SearchService.attributedSnippet(match.snippet, query: query))
                 .appFont(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
                 .lineLimit(2)
         }
         .padding(.vertical, 4)

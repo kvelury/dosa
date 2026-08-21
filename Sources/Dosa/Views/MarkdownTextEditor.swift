@@ -386,10 +386,12 @@ struct MarkdownTextEditor: NSViewRepresentable {
 }
 
 enum MarkdownStyler {
+    /// Unscaled; every actual size read from this type goes through
+    /// `Typography.scaled(_:)` so the editor tracks the Text Size setting.
     static let baseFontSize: CGFloat = 14
-    static var baseFont: NSFont { Typography.nsFont(size: baseFontSize) }
-    static var monoFont: NSFont { Typography.nsMono(size: baseFontSize - 1) }
-    static let markerColor = NSColor.tertiaryLabelColor
+    static var baseFont: NSFont { Typography.nsFont(size: Typography.scaled(baseFontSize)) }
+    static var monoFont: NSFont { Typography.nsMono(size: Typography.scaled(baseFontSize - 1)) }
+    static var markerColor: NSColor { Theme.tertiaryText }
     static var bulletColor: NSColor { Theme.current.highlight }
     static var codeSpanColor: NSColor { Theme.current.codeSpan }
 
@@ -423,7 +425,7 @@ enum MarkdownStyler {
         case 3: size = 16
         default: size = 14.5
         }
-        return Typography.nsFont(size: size, weight: .bold)
+        return Typography.nsFont(size: Typography.scaled(size), weight: .bold)
     }
 
     static func style(_ textView: NSTextView, diffBase: String? = nil) {
@@ -447,7 +449,7 @@ enum MarkdownStyler {
             }
             if inCodeBlock {
                 storage.addAttribute(.font, value: monoFont, range: lineRange)
-                storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: lineRange)
+                storage.addAttribute(.foregroundColor, value: Theme.secondaryText, range: lineRange)
                 return
             }
             styleLine(line, lineRange: lineRange, storage: storage)
@@ -460,15 +462,19 @@ enum MarkdownStyler {
         var typingAttributes = baseAttributes
         if diffBase != nil {
             // Anything newly typed is by definition not in the manual notes,
-            // so it starts out in the addition color.
+            // so it starts out in the addition color — plus an underline (see
+            // applyDiffColors) so authorship isn't color-only (WCAG 1.4.1).
             typingAttributes[.foregroundColor] = DiffEngine.aiNSColor
+            typingAttributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
         }
         textView.typingAttributes = typingAttributes
     }
 
     /// Tints every token that does not survive from `base` (the manual notes)
-    /// with the Dosa-addition color. Runs after markdown styling so fonts and
-    /// indents are preserved; only the foreground color is overridden.
+    /// with the Dosa-addition color, and underlines it. Runs after markdown
+    /// styling so fonts and indents are preserved. The underline is a
+    /// redundant, non-color signal for authorship (WCAG 1.4.1) — color alone
+    /// isn't a reliable way to distinguish "your notes" from "Dosa's additions".
     private static func applyDiffColors(base: String, storage: NSTextStorage) {
         let (tokens, ranges) = tokenizeWithRanges(storage.string)
         let baseTokens = DiffEngine.tokenize(base)
@@ -478,6 +484,7 @@ enum MarkdownStyler {
         }
         for (offset, range) in ranges.enumerated() where insertedOffsets.contains(offset) && range.length > 0 {
             storage.addAttribute(.foregroundColor, value: DiffEngine.aiNSColor, range: range)
+            storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
         }
     }
 
@@ -536,15 +543,15 @@ enum MarkdownStyler {
             paragraph.lineSpacing = 3
             paragraph.paragraphSpacing = 2
             let prefixWidth = CGFloat(match.range(at: 3).location + match.range(at: 3).length)
-            paragraph.headIndent = prefixWidth * (baseFontSize * 0.52)
+            paragraph.headIndent = prefixWidth * (Typography.scaled(baseFontSize) * 0.52)
             storage.addAttribute(.paragraphStyle, value: paragraph, range: lineRange)
             inlineStart = match.range.location + match.range.length
         } else if let match = quote.firstMatch(in: line, range: localRange) {
-            storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: lineRange)
+            storage.addAttribute(.foregroundColor, value: Theme.secondaryText, range: lineRange)
             storage.addAttribute(.foregroundColor, value: bulletColor, range: global(match.range(at: 2)))
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = 3
-            paragraph.headIndent = baseFontSize
+            paragraph.headIndent = Typography.scaled(baseFontSize)
             storage.addAttribute(.paragraphStyle, value: paragraph, range: lineRange)
             inlineStart = match.range.location + match.range.length
         }

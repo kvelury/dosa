@@ -165,6 +165,7 @@ struct NoteEditorView: View {
                     DatePicker("", selection: note.createdAt, displayedComponents: .date)
                         .datePickerStyle(.graphical)
                         .labelsHidden()
+                        .accessibilityLabel("Note date")
                         .padding(12)
                         .frame(width: 260)
                 }
@@ -173,6 +174,7 @@ struct NoteEditorView: View {
                         Image(systemName: "calendar")
                     }
                     .help(event.displayTitle)
+                    .accessibilityLabel(event.displayTitle)
                     .popover(isPresented: $showMeeting) {
                         CalendarEventDetailView(event: event, style: .compact)
                     }
@@ -186,6 +188,8 @@ struct NoteEditorView: View {
                     EditorPill(info: generationInfo(for: current)) {
                         Image(systemName: "sparkles")
                     }
+                    .accessibilityLabel("Notes generation details")
+                    .accessibilityValue(generationInfo(for: current) ?? "")
                 }
                 Spacer()
                 if current.enhancedMarkdown != nil {
@@ -196,6 +200,7 @@ struct NoteEditorView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+                    .accessibilityLabel("Note view")
                     .frame(width: 210)
                 }
             }
@@ -235,14 +240,20 @@ struct NoteEditorView: View {
                     Label("Your notes", systemImage: "circle.fill")
                         .appFont(size: 13)
                         .foregroundStyle(.primary)
+                    // Authorship is signaled by color *and* an underline here —
+                    // the underline is the redundant, non-color channel that
+                    // carries into the body text itself (see applyDiffColors).
                     Label("Dosa additions", systemImage: "circle.fill")
                         .appFont(size: 13)
                         .foregroundStyle(DiffEngine.aiColor)
+                        .underline()
                     Spacer()
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 7)
                 .padding(.bottom, 7)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Legend: your notes shown in the default color, Dosa's additions underlined and tinted")
                 MarkdownTextEditor(
                     text: enhancedBinding(note: note),
                     diffAgainst: current.manualText,
@@ -251,6 +262,7 @@ struct NoteEditorView: View {
                     onMediaFileDrop: { requestAudio(.importFile($0)) },
                     onMediaDragChanged: { isDropTargeted = $0 }
                 )
+                .accessibilityLabel("Dosa notes, editable")
             }
         } else {
             VStack(alignment: .leading, spacing: 0) {
@@ -262,9 +274,10 @@ struct NoteEditorView: View {
                             .appFont(.caption)
                         Spacer()
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 6)
+                    .accessibilityElement(children: .combine)
                 }
                 MarkdownTextEditor(
                     text: note.manualText,
@@ -274,6 +287,7 @@ struct NoteEditorView: View {
                     onMediaFileDrop: { requestAudio(.importFile($0)) },
                     onMediaDragChanged: { isDropTargeted = $0 }
                 )
+                .accessibilityLabel(current.enhancedMarkdown == nil ? "My notes, editable" : "My notes, read-only")
                 .padding(.top, 2)
             }
         }
@@ -353,12 +367,15 @@ struct NoteEditorView: View {
                 .scaledToFit()
                 .frame(width: 10, height: 10)
                 .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
                 .frame(width: Self.tabWidth, height: Self.tabHeight)
-                .contentShape(Rectangle())
+                // The drawn silhouette (52×18, BarPedestalShape) stays fixed —
+                // only the *hit* area grows, to clear the 24pt target guideline.
+                .contentShape(OutsetRectangle(outset: 4))
         }
         .buttonStyle(.plain)
         .help(showQuickSettings ? "Hide quick settings" : "Model and notes style")
+        .accessibilityLabel(showQuickSettings ? "Hide quick settings" : "Show quick settings")
     }
 
     /// Hairline fill along the top inner edge of the pill, in the active theme accent.
@@ -376,6 +393,9 @@ struct NoteEditorView: View {
             .frame(height: 3)
             .padding(.horizontal, 26)
             .allowsHitTesting(false)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Transcription progress")
+            .accessibilityValue("\(Int(min(max(progress, 0), 1) * 100)) percent")
         }
     }
 
@@ -383,7 +403,7 @@ struct NoteEditorView: View {
         HStack(spacing: 10) {
             Text(TimeFormatting.clock(player.currentTime))
                 .appFont(.caption, monospacedDigit: true)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
             Slider(
                 value: Binding(
                     get: { player.currentTime },
@@ -393,17 +413,20 @@ struct NoteEditorView: View {
             )
             .controlSize(.small)
             .frame(minWidth: 260)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue(TimeFormatting.spoken(player.currentTime))
             Text(TimeFormatting.clock(player.duration))
                 .appFont(.caption, monospacedDigit: true)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
             Button {
                 player.stop()
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
             }
             .buttonStyle(.plain)
             .help("Stop playback")
+            .accessibilityLabel("Stop playback")
         }
     }
 
@@ -414,14 +437,15 @@ struct NoteEditorView: View {
                 RecordingWaveformView(levels: recorder.levelHistory)
                 Text(TimeFormatting.clock(recorder.elapsed))
                     .appMonoFont(.body)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.current.dangerTextColor)
+                    .accessibilityLabel("Recording, \(TimeFormatting.spoken(recorder.elapsed))")
             }
             if isImporting {
                 ProgressView()
                     .controlSize(.small)
                 Text("Importing…")
                     .appFont(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
             }
             Divider()
                 .frame(height: 22)
@@ -433,7 +457,7 @@ struct NoteEditorView: View {
                         generator.phase == .transcribing ? "Stop Transcribing" : "Stop Generating",
                         systemImage: "stop.circle"
                     )
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.current.dangerTextColor)
                 }
                 .buttonStyle(.bordered)
                 .help("Cancel and discard this run")
@@ -467,7 +491,7 @@ struct NoteEditorView: View {
                     .controlSize(.small)
                 Text("Exporting to Notion…")
                     .appFont(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
             }
             if current.transcript != nil || current.enhancedMarkdown != nil {
                 Divider()
@@ -479,6 +503,7 @@ struct NoteEditorView: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Search within this note and its transcript (⌘F)")
+                .accessibilityLabel("Search within note")
                 .popover(isPresented: $showNoteSearch, arrowEdge: .top) {
                     NoteSearchView(note: current) {
                         showNoteSearch = false
@@ -519,7 +544,9 @@ struct NoteEditorView: View {
             }
             .buttonStyle(.plain)
             .help("Stop recording")
+            .accessibilityLabel("Stop recording")
         } else if let url = store.recordingURL(for: current) {
+            let isPlaying = player.playingNoteId == noteId && player.isPlaying
             Button {
                 if player.playingNoteId == noteId {
                     player.togglePlayPause()
@@ -527,14 +554,15 @@ struct NoteEditorView: View {
                     player.play(url: url, noteId: noteId)
                 }
             } label: {
-                Image(systemName: player.playingNoteId == noteId && player.isPlaying ? "pause.fill" : "play.fill")
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.current.onAccentColor)
                     .frame(width: 32, height: 32)
                     .background(Circle().fill(Theme.current.accentColor))
             }
             .buttonStyle(.plain)
-            .help(player.playingNoteId == noteId && player.isPlaying ? "Pause playback" : "Play the meeting recording")
+            .help(isPlaying ? "Pause playback" : "Play the meeting recording")
+            .accessibilityLabel(isPlaying ? "Pause playback" : "Play the meeting recording")
         } else {
             Button(action: startRecording) {
                 Image(systemName: "record.circle")
@@ -548,6 +576,7 @@ struct NoteEditorView: View {
             .help(recorder.isRecording
                   ? "Already recording in another note"
                   : "Record meeting audio (your microphone + system audio)")
+            .accessibilityLabel(recorder.isRecording ? "Already recording in another note" : "Start recording")
         }
     }
 
@@ -863,6 +892,17 @@ struct NoteEditorView: View {
         } catch {
             localError = error.localizedDescription
         }
+    }
+}
+
+/// A rectangle expanded past the view's own bounds — for `.contentShape(_:)`
+/// only, to grow a tap target without changing the view's measured size (and
+/// so, here, without changing what `BarPedestalShape` measures to draw).
+private struct OutsetRectangle: Shape {
+    var outset: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(rect.insetBy(dx: -outset, dy: -outset))
     }
 }
 

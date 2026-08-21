@@ -92,9 +92,16 @@ enum DiffEngine {
                 headingLevel = token.count
             }
             var piece = AttributedString((lastWasNewline ? "" : " ") + token)
-            piece.foregroundColor = insertedOffsets.contains(offset) ? aiColor : .primary
+            let isInserted = insertedOffsets.contains(offset)
+            piece.foregroundColor = isInserted ? aiColor : .primary
+            // Underline, not just color, marks a Dosa addition (WCAG 1.4.1) —
+            // matches MarkdownStyler.applyDiffColors, the live editor's version
+            // of this same diff.
+            if isInserted {
+                piece.underlineStyle = .single
+            }
             if let level = headingLevel {
-            piece.font = Typography.font(size: headingFontSize(level: level), weight: .bold)
+                piece.font = Typography.font(size: Typography.scaled(headingFontSize(level: level)), weight: .bold)
             }
             result += piece
             lastWasNewline = false
@@ -102,10 +109,12 @@ enum DiffEngine {
         return result
     }
 
+    // Matches MarkdownStyler.headingFont(level:) in MarkdownTextEditor.swift —
+    // kept identical so this preview and the live editor never disagree.
     private static func headingFontSize(level: Int) -> CGFloat {
         switch level {
-        case 1: return 22
-        case 2: return 18
+        case 1: return 23
+        case 2: return 19
         case 3: return 16
         default: return 14.5
         }
