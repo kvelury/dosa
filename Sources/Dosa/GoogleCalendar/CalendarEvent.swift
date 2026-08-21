@@ -78,6 +78,34 @@ struct CalendarEvent: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+extension CalendarEvent {
+    /// Rebuilt from the fields a note stored before snapshots existed, so the
+    /// meeting chip still opens something useful on older notes.
+    static func placeholder(for note: Note) -> CalendarEvent? {
+        guard let uid = note.calendarEventUID,
+              let instanceStart = note.calendarEventInstanceStart else { return nil }
+        return CalendarEvent(
+            identity: CalendarEventIdentity(iCalUID: uid, instanceStart: instanceStart),
+            googleEventID: uid,
+            calendarID: note.calendarID ?? "",
+            calendarName: "",
+            title: note.title,
+            start: instanceStart,
+            end: instanceStart,
+            isAllDay: false,
+            timeZoneIdentifier: nil,
+            status: "confirmed",
+            selfResponseStatus: nil,
+            attendees: [],
+            location: nil,
+            descriptionHTML: nil,
+            googleCalendarURL: note.calendarHTMLLink.flatMap(URL.init(string:)),
+            meetingLinks: [],
+            eventType: "default"
+        )
+    }
+}
+
 enum CalendarHTML {
     static func plainText(_ html: String) -> String {
         guard !html.isEmpty else { return "" }
