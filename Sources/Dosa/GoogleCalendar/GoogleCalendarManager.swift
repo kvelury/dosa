@@ -170,7 +170,9 @@ final class GoogleCalendarManager: ObservableObject {
 
     // MARK: - OAuth client
 
-    var activeClientID: String? { GoogleCalendarAuth.credentials?.clientID }
+    /// Deliberately not `credentials?.clientID` — this is read on every render of
+    /// the Settings section, and `credentials` reaches into the keychain.
+    var activeClientID: String? { GoogleCalendarAuth.clientID }
 
     func setCredentials(from url: URL) {
         do {

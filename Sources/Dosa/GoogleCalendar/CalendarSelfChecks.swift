@@ -236,6 +236,21 @@ public enum CalendarSelfChecks {
             "the .example placeholder should be rejected"
         )
 
+        // Dosa is ad-hoc signed, so a keychain read can cost an access prompt.
+        // `clientID` and `hasCredentials` are read on every render of the Settings
+        // section; if either reaches the keychain the user gets a prompt storm.
+        // Keep them on UserDefaults.
+        let defaults = UserDefaults.standard
+        let savedClientID = defaults.string(forKey: AppSettings.googleCalendarClientIDKey)
+        defaults.set("render-path-probe.apps.googleusercontent.com", forKey: AppSettings.googleCalendarClientIDKey)
+        expect(GoogleCalendarAuth.clientID == "render-path-probe.apps.googleusercontent.com",
+               "clientID should read straight from UserDefaults")
+        defaults.removeObject(forKey: AppSettings.googleCalendarClientIDKey)
+        expect(GoogleCalendarAuth.clientID == nil, "clearing the default clears the client ID")
+        if let savedClientID {
+            defaults.set(savedClientID, forKey: AppSettings.googleCalendarClientIDKey)
+        }
+
         return failures
     }
 }
