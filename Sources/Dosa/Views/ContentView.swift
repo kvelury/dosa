@@ -139,5 +139,6 @@ struct ContentView: View {
         }
         .task { await updater.checkOnLaunch() }
         .tint(Theme.current.accentColor)
+        .appFontScope()
     }
 }

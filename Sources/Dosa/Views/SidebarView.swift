@@ -78,7 +78,7 @@ struct SidebarView: View {
                 }
             }
             .buttonStyle(.borderless)
-            .font(.system(size: 16, weight: .medium))
+            .font(.system(size: 16, weight: .medium)) // system-font: sizes the SF Symbols in this toolbar row
             .foregroundStyle(.secondary)
             .padding(.horizontal, 14)
             .padding(.top, 34)
@@ -175,7 +175,7 @@ struct SidebarView: View {
     private var notesList: some View {
         List(selection: $selectedNoteIds) {
             if !store.pinnedNotes.isEmpty {
-                Section("Pinned") {
+                Section {
                     ForEach(store.pinnedNotes) { note in
                         NoteRow(
                             note: note,
@@ -183,6 +183,8 @@ struct SidebarView: View {
                             onRequestDelete: requestDelete
                         )
                     }
+                } header: {
+                    Text("Pinned").appFont(.caption, weight: .semibold)
                 }
             }
 
@@ -285,6 +287,7 @@ private struct RootDropHeader: View {
             }
             Spacer()
         }
+        .appFont(.caption, weight: .semibold)
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
         .background(

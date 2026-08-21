@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 
 enum BuildInfo {
-    static let shortVersion  = info("CFBundleShortVersionString") ?? "1.6"
+    static let shortVersion  = info("CFBundleShortVersionString") ?? "1.6.1"
     static let bundleVersion = info("CFBundleVersion") ?? "0"
     static let commit        = info("DosaBuildCommit") ?? ""
     static var shortCommit: String { String(commit.prefix(7)) }

@@ -46,6 +46,7 @@ struct GlobalSearchView: View {
             content
         }
         .frame(width: 640, height: 540)
+        .appFontScope()
         .onAppear { searchFocused = true }
     }
 
@@ -162,6 +163,7 @@ struct NoteSearchView: View {
             }
         }
         .frame(width: 420, height: 330)
+        .appFontScope()
         .onAppear { searchFocused = true }
     }
 
