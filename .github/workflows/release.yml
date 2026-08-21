@@ -46,7 +46,7 @@ jobs:
           [ "$CHANNEL" = "release" ] || { echo "::error::channel is $CHANNEL"; exit 1; }
           # Catches a future edit that stamps the plist after codesign.
           codesign --verify --strict --verbose=2 build/Dosa.app
-          git diff --quiet -- Resources/Info.plist || { echo "::error::build.sh dirtied the tracked Info.plist"; exit 1; }
+          git diff --quiet || { echo "::error::build.sh dirtied tracked files"; git status --short >&2; exit 1; }
 
       - name: Package
         id: pkg
