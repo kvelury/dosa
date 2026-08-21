@@ -29,7 +29,7 @@ struct Note: Identifiable, Codable, Hashable {
     var pinnedAt: Date?
     var deletedAt: Date?
     /// Model and note-style used the last time Dosa generated notes for this
-    /// note, for display next to the "your notes / dosa additions" legend.
+    /// note, for the editor header's sparkle pill hover card.
     var generationModel: String?
     var generationStyle: String?
     var templateId: UUID?

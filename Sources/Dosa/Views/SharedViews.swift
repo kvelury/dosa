@@ -642,28 +642,53 @@ struct ErrorDialogView: View {
 }
 
 /// A themed capsule chip matching the homepage meeting cards' fill and hairline
-/// border. Pass `action` to make it clickable with a hover cue; omit it for a
-/// static chip like the recording-duration indicator.
+/// border. Pass `action` to make it clickable with a hover cue; pass `info` to
+/// reveal a themed card below it on hover; omit both for a static chip like
+/// the recording-duration indicator.
 struct EditorPill<PillLabel: View>: View {
     var action: (() -> Void)?
+    var info: String?
     @ViewBuilder var label: PillLabel
 
     @State private var isHovering = false
 
+    private var tracksHover: Bool { action != nil || info != nil }
+
     var body: some View {
-        if let action {
-            Button(action: action) { content }
-                .buttonStyle(.plain)
-                .onHover { hovering in
-                    isHovering = hovering
-                    if hovering {
-                        NSCursor.pointingHand.push()
-                    } else {
-                        NSCursor.pop()
-                    }
+        Group {
+            if let action {
+                Button(action: action) { content }
+                    .buttonStyle(.plain)
+            } else {
+                content
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let info, isHovering {
+                Text(info)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.current.cardFillColor))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .offset(y: 34)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .applyIf(tracksHover) { view in
+            view.onHover { hovering in
+                isHovering = hovering
+                guard action != nil else { return }
+                if hovering {
+                    NSCursor.pointingHand.push()
+                } else {
+                    NSCursor.pop()
                 }
-        } else {
-            content
+            }
         }
     }
 
@@ -676,5 +701,18 @@ struct EditorPill<PillLabel: View>: View {
             .overlay(Capsule().strokeBorder(.quaternary))
             .overlay(Capsule().fill(Theme.current.accentColor.opacity(isHovering ? 0.10 : 0)))
             .contentShape(Capsule())
+    }
+}
+
+private extension View {
+    /// Applies `transform` only when `condition` holds, for modifiers (like
+    /// `.onHover`) that shouldn't be attached at all otherwise.
+    @ViewBuilder
+    func applyIf<Content: View>(_ condition: Bool, _ transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
     }
 }

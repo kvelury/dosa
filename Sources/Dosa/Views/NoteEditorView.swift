@@ -182,6 +182,11 @@ struct NoteEditorView: View {
                         Label(TimeFormatting.clock(duration), systemImage: "waveform")
                     }
                 }
+                if current.enhancedMarkdown != nil {
+                    EditorPill(info: generationInfo(for: current)) {
+                        Image(systemName: "sparkles")
+                    }
+                }
                 Spacer()
                 if current.enhancedMarkdown != nil {
                     Picker("", selection: $viewMode) {
@@ -198,6 +203,7 @@ struct NoteEditorView: View {
         .padding(.horizontal, 20)
         .padding(.top, 16)
         .padding(.bottom, 10)
+        .zIndex(1)
     }
 
     /// Resolves the meeting a note is linked to: the live calendar first, so an
@@ -213,40 +219,30 @@ struct NoteEditorView: View {
             ?? .placeholder(for: note)
     }
 
+    /// "deepseek-v4-flash | detailed" for the sparkle pill's hover card. Nil on
+    /// notes generated before the model and style were recorded — the pill still
+    /// shows, it just has nothing to explain.
+    private func generationInfo(for note: Note) -> String? {
+        guard let model = note.generationModel, let style = note.generationStyle else { return nil }
+        return "\(model.lowercased()) | \(style.lowercased())"
+    }
+
     @ViewBuilder
     private func content(note: Binding<Note>, current: Note) -> some View {
         if viewMode == .aiNotes, current.enhancedMarkdown != nil {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 14) {
-                        Label("Your notes", systemImage: "circle.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.primary)
-                        Label("Dosa additions", systemImage: "circle.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(DiffEngine.aiColor)
-                        Spacer()
-                    }
-                    if let model = current.generationModel, let style = current.generationStyle {
-                        // Concatenated so the separator stays upright — italicizing
-                        // a bar just makes it look like a stray slash.
-                        let line: Text = {
-                            var line = Text(model.lowercased()).italic()
-                                + Text(" | ")
-                                + Text("style: \(style)".lowercased()).italic()
-                            if let template = current.templateName {
-                                line = line + Text(" | ") + Text("template: \(template)".lowercased()).italic()
-                            }
-                            return line
-                        }()
-                        line
-                            .font(.system(size: 13))
-                            .foregroundStyle(.tertiary)
-                    }
+                HStack(spacing: 14) {
+                    Label("Your notes", systemImage: "circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary)
+                    Label("Dosa additions", systemImage: "circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DiffEngine.aiColor)
+                    Spacer()
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 7)
-                .padding(.bottom, current.generationModel != nil ? 12 : 7)
+                .padding(.bottom, 7)
                 MarkdownTextEditor(
                     text: enhancedBinding(note: note),
                     diffAgainst: current.manualText,
