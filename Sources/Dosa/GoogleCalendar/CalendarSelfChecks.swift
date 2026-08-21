@@ -185,6 +185,57 @@ public enum CalendarSelfChecks {
         expect(store.note(id: first.id)?.calendarEventUID == nil, "restored note stays unlinked")
         expect(store.activeNote(for: meeting.identity)?.id == replacement.id, "restore does not steal the active link")
 
+        // OAuth client JSON. The shape Google actually hands you is nested under
+        // "installed"; a flat object with the same fields is also accepted.
+        func parsed(_ json: String, _ message: String) -> GoogleCalendarAuth.Credentials? {
+            do {
+                return try GoogleCalendarAuth.parseClientJSON(Data(json.utf8))
+            } catch {
+                expect(false, "\(message): \(error.localizedDescription)")
+                return nil
+            }
+        }
+        func rejects(_ json: String, _ message: String) {
+            if (try? GoogleCalendarAuth.parseClientJSON(Data(json.utf8))) != nil {
+                expect(false, message)
+            }
+        }
+
+        let installed = parsed(
+            #"{"installed":{"client_id":"123.apps.googleusercontent.com","client_secret":"shh","redirect_uris":["http://localhost"]}}"#,
+            "desktop client JSON should parse"
+        )
+        expect(installed?.clientID == "123.apps.googleusercontent.com", "installed client_id")
+        expect(installed?.clientSecret == "shh", "installed client_secret")
+
+        let web = parsed(
+            #"{"web":{"client_id":"456.apps.googleusercontent.com","client_secret":"psst"}}"#,
+            "web client JSON should parse"
+        )
+        expect(web?.clientID == "456.apps.googleusercontent.com", "web client_id")
+
+        let flat = parsed(
+            #"{"client_id":"  789.apps.googleusercontent.com  ","client_secret":"  x  "}"#,
+            "flat client JSON should parse"
+        )
+        expect(flat?.clientID == "789.apps.googleusercontent.com", "client_id is trimmed")
+        expect(flat?.clientSecret == "x", "client_secret is trimmed")
+
+        let noSecret = parsed(#"{"installed":{"client_id":"abc.apps.googleusercontent.com"}}"#,
+                              "client without a secret should parse")
+        expect(noSecret?.clientSecret == nil, "absent client_secret stays nil")
+        let blankSecret = parsed(#"{"client_id":"abc.apps.googleusercontent.com","client_secret":"   "}"#,
+                                 "blank secret should parse")
+        expect(blankSecret?.clientSecret == nil, "whitespace-only client_secret is treated as absent")
+
+        rejects(#"{"installed":{"client_secret":"shh"}}"#, "missing client_id should be rejected")
+        rejects(#"{"client_id":"   "}"#, "blank client_id should be rejected")
+        rejects("not json at all", "malformed JSON should be rejected")
+        rejects(
+            #"{"client_id":"YOUR_DESKTOP_OAUTH_CLIENT_ID.apps.googleusercontent.com"}"#,
+            "the .example placeholder should be rejected"
+        )
+
         return failures
     }
 }

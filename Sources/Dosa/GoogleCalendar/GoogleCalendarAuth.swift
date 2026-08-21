@@ -8,8 +8,6 @@ final class GoogleCalendarAuth {
     static let authorizationEndpoint = URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!
     static let tokenEndpoint = URL(string: "https://oauth2.googleapis.com/token")!
     static let revokeEndpoint = URL(string: "https://oauth2.googleapis.com/revoke")!
-    static let clientIDInfoKey = "DOSAGoogleCalendarClientID"
-    static let clientSecretInfoKey = "DOSAGoogleCalendarClientSecret"
     static let scopes = [
         "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
         "https://www.googleapis.com/auth/calendar.events.readonly",
@@ -17,8 +15,16 @@ final class GoogleCalendarAuth {
 
     private static let callbackPorts: [UInt16] = [53690, 53691, 53692, 53693]
 
+    /// The OAuth client Dosa authorizes with. Supplied by the user in Settings —
+    /// nothing is ever baked into the app bundle.
+    struct Credentials: Equatable {
+        let clientID: String
+        let clientSecret: String?
+    }
+
     enum AuthError: LocalizedError {
         case credentialsMissing
+        case malformedClientJSON(String)
         case notConnected
         case browserFailed
         case callbackFailed(String)
@@ -29,7 +35,9 @@ final class GoogleCalendarAuth {
         var errorDescription: String? {
             switch self {
             case .credentialsMissing:
-                return "This build of Dosa doesn’t include Google Calendar credentials. Add Resources/GoogleCalendarOAuth.json and rebuild."
+                return "No Google OAuth client is configured. Add one in Settings › Google Calendar."
+            case .malformedClientJSON(let detail):
+                return "That doesn’t look like a Google OAuth client file: \(detail)"
             case .notConnected:
                 return "Google Calendar is not connected. Open Settings and connect your Google account."
             case .browserFailed:
@@ -48,16 +56,69 @@ final class GoogleCalendarAuth {
 
     private var loopbackServer: LoopbackHTTPServer?
 
-    static var clientID: String? {
-        string(fromInfo: clientIDInfoKey)
-    }
-
-    static var clientSecret: String? {
-        string(fromInfo: clientSecretInfoKey)
+    /// The OAuth client to authorize with, as configured in Settings. Kept in the
+    /// keychain rather than the app bundle so it survives an update replacing the
+    /// bundle, and so no credentials ever have to live in the repo or in a
+    /// published release.
+    static var credentials: Credentials? {
+        guard let clientID = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.clientIDAccount)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !clientID.isEmpty else { return nil }
+        return Credentials(
+            clientID: clientID,
+            clientSecret: GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.clientSecretAccount)
+        )
     }
 
     var hasCredentials: Bool {
-        Self.clientID != nil
+        Self.credentials != nil
+    }
+
+    // MARK: - Configuring the client
+
+    /// Accepts the file Google Cloud Console hands you for a Desktop client —
+    /// `{"installed": {…}}` — as well as the `{"web": {…}}` variant and a flat
+    /// object with the two fields at the top level.
+    static func parseClientJSON(_ data: Data) throws -> Credentials {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AuthError.malformedClientJSON("it isn’t valid JSON.")
+        }
+        let container = (root["installed"] as? [String: Any])
+            ?? (root["web"] as? [String: Any])
+            ?? root
+
+        func field(_ key: String) -> String? {
+            let value = (container[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (value?.isEmpty == false) ? value : nil
+        }
+
+        guard let clientID = field("client_id") else {
+            throw AuthError.malformedClientJSON("no client_id field.")
+        }
+        // Placeholder values parse fine but would fail at the consent screen with
+        // an opaque Google error, so reject them up front.
+        guard !clientID.hasPrefix("YOUR_") else {
+            throw AuthError.malformedClientJSON("it still has placeholder values.")
+        }
+        return Credentials(clientID: clientID, clientSecret: field("client_secret"))
+    }
+
+    /// Stores the client and drops any existing session: tokens minted by a
+    /// different client are invalid, and keeping them would surface later as an
+    /// opaque invalid_grant on the next refresh.
+    static func saveCredentials(_ credentials: Credentials) {
+        GoogleCalendarKeychain.set(credentials.clientID, account: GoogleCalendarKeychain.clientIDAccount)
+        if let secret = credentials.clientSecret {
+            GoogleCalendarKeychain.set(secret, account: GoogleCalendarKeychain.clientSecretAccount)
+        } else {
+            GoogleCalendarKeychain.delete(account: GoogleCalendarKeychain.clientSecretAccount)
+        }
+        GoogleCalendarKeychain.clearTokens()
+    }
+
+    /// Leaves Calendar unconfigured until another client is supplied.
+    static func clearCredentials() {
+        GoogleCalendarKeychain.clearClientCredentials()
+        GoogleCalendarKeychain.clearTokens()
     }
 
     var isConnected: Bool {
@@ -79,7 +140,8 @@ final class GoogleCalendarAuth {
     }
 
     func authorize() async throws {
-        guard let clientID = Self.clientID else { throw AuthError.credentialsMissing }
+        guard let credentials = Self.credentials else { throw AuthError.credentialsMissing }
+        let clientID = credentials.clientID
 
         guard let (server, port) = LoopbackHTTPServer.startOnFirstFreePort(Self.callbackPorts) else {
             throw AuthError.noFreePort
@@ -131,7 +193,7 @@ final class GoogleCalendarAuth {
             "client_id": clientID,
             "code_verifier": verifier,
         ]
-        if let secret = Self.clientSecret {
+        if let secret = credentials.clientSecret {
             body["client_secret"] = secret
         }
         let tokenResponse = try await requestToken(body: body)
@@ -152,15 +214,15 @@ final class GoogleCalendarAuth {
     @discardableResult
     func refreshAccessToken() async throws -> String {
         guard let refreshToken = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.refreshTokenAccount),
-              let clientID = Self.clientID else {
+              let credentials = Self.credentials else {
             throw AuthError.notConnected
         }
         var body: [String: String] = [
             "grant_type": "refresh_token",
             "refresh_token": refreshToken,
-            "client_id": clientID,
+            "client_id": credentials.clientID,
         ]
-        if let secret = Self.clientSecret {
+        if let secret = credentials.clientSecret {
             body["client_secret"] = secret
         }
         let response = try await requestToken(body: body)
@@ -222,11 +284,5 @@ final class GoogleCalendarAuth {
         }
         .joined(separator: "&")
         .data(using: .utf8)
-    }
-
-    private static func string(fromInfo key: String) -> String? {
-        let value = (Bundle.main.object(forInfoDictionaryKey: key) as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (value?.isEmpty == false) ? value : nil
     }
 }

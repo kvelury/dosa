@@ -59,6 +59,8 @@ struct SettingsView: View {
     @State private var transcriptPromptExpanded = false
     @State private var expandedTemplateIds: Set<UUID> = []
     @State private var selectedTab = "Gemini"
+    @State private var showingClientPasteSheet = false
+    @State private var pastedClientJSON = ""
 
     private static let providers = ["Gemini", "Anthropic", "OpenAI", "DeepSeek"]
 
@@ -148,12 +150,22 @@ struct SettingsView: View {
         Section {
             switch calendar.connectionState {
             case .unavailable:
-                Text("This build of Dosa doesn’t include Google Calendar credentials. Add Resources/GoogleCalendarOAuth.json and rebuild.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("No Google OAuth client is configured. Create a Desktop client in the Google Cloud Console, then add the JSON it gives you.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Choose client_secret.json…") { chooseGoogleClientFile() }
+                        Button("Paste JSON…") {
+                            pastedClientJSON = ""
+                            showingClientPasteSheet = true
+                        }
+                        Spacer()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             case .disconnected:
                 HStack {
                     Button("Connect Google Calendar…") {
@@ -232,6 +244,16 @@ struct SettingsView: View {
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                if let clientID = calendar.activeClientID {
+                    HStack(spacing: 6) {
+                        Text("OAuth client \(clientID.prefix(12))…")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Button("Remove") { calendar.clearCredentials() }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
+                }
                 if let calendarError = calendar.errorMessage {
                     Text(calendarError)
                         .font(.caption)
@@ -918,6 +940,36 @@ struct SettingsView: View {
         .onDisappear {
             appState.themeRefreshTick += 1
         }
+        .sheet(isPresented: $showingClientPasteSheet) {
+            googleClientPasteSheet
+        }
+    }
+
+    private var googleClientPasteSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Paste Google OAuth Client JSON")
+                .font(.headline)
+            Text("The contents of the client_secret….json downloaded from the Google Cloud Console.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $pastedClientJSON)
+                .font(.system(.caption, design: .monospaced))
+                .frame(minHeight: 180)
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+            HStack {
+                Spacer()
+                Button("Cancel") { showingClientPasteSheet = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    calendar.setCredentials(json: pastedClientJSON)
+                    showingClientPasteSheet = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(pastedClientJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
     }
 
     private func colorSwatch(_ name: String) -> some View {
@@ -1068,6 +1120,15 @@ struct SettingsView: View {
         } catch {
             backupStatus = "Export failed: \(error.localizedDescription)"
         }
+    }
+
+    private func chooseGoogleClientFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.title = "Choose Google OAuth Client JSON"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        calendar.setCredentials(from: url)
     }
 
     private func importSettings() {
