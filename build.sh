@@ -27,6 +27,9 @@ done
 echo "==> Checking window chrome…"
 ./Scripts/check-window-chrome.sh
 
+echo "==> Checking typography coverage…"
+./Scripts/check-typography.sh
+
 echo "==> Building Dosa (release)…"
 swift build -c release
 

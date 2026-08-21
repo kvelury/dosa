@@ -35,6 +35,7 @@ struct SetupBanner: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.current.accentColor)
                     .controlSize(.small)
+                    .appFont(.subheadline)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -94,10 +95,12 @@ struct CalendarSetupBanner: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.current.accentColor)
                 .controlSize(.small)
+                .appFont(.subheadline)
             Button("Dismiss") {
                 calendar.dismissSetupBanner()
             }
             .controlSize(.small)
+            .appFont(.subheadline)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -638,6 +641,7 @@ struct ErrorDialogView: View {
         }
         .padding(20)
         .frame(width: 460)
+        .appFontScope()
     }
 }
 

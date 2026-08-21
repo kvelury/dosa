@@ -127,7 +127,7 @@ struct SettingsView: View {
                 }
             }
         } header: {
-            Text("Notion")
+            sectionHeader("Notion")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Connect your own Notion account (opens the browser). Dosa creates a private “Dosa Notes” database in your workspace and exports notes there via Export to Notion in a note's ⋯ menu.")
@@ -238,7 +238,7 @@ struct SettingsView: View {
                 }
             }
         } header: {
-            Text("Google Calendar")
+            sectionHeader("Google Calendar")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Connect your Google account in the browser. Dosa reads the next 30 days of meetings from the calendars you select and shows them on the home screen. At least one calendar must stay selected.")
@@ -362,7 +362,7 @@ struct SettingsView: View {
             Link("View releases on GitHub →", destination: UpdateManager.releasesPageURL)
                 .appFont(.caption)
         } header: {
-            Text("Updates")
+            sectionHeader("Updates")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Updates are built from the latest commit on main and downloaded from GitHub Releases. Because Dosa is signed ad-hoc rather than with a Developer ID certificate, macOS treats each update as a new app — you'll be asked again for Microphone and Screen & System Audio Recording permission after installing.")
@@ -542,7 +542,7 @@ struct SettingsView: View {
                 }
             }
         } header: {
-            Text("Note Templates")
+            sectionHeader("Note Templates")
         } footer: {
             Text("Templates appear under Templates in the ＋ menu in the sidebar. Choosing one prefills the note with its sections and tells the AI what kind of conversation it is, so the generated notes match. {{user_name}} works inside a template's AI context. Any template can be deleted, built-in ones included — Restore Defaults brings the four shipped templates back. A template only sets structure and context: generated notes stay a factual record either way, and never score or pass judgement on a conversation.")
                 .appFont(.caption)
@@ -610,7 +610,7 @@ struct SettingsView: View {
                 Section {
                     TextField("Your Name", text: $userName)
                 } header: {
-                    Text("Profile")
+                    sectionHeader("Profile")
                 } footer: {
                     Text("Told to the AI so it labels your voice with the right name in transcripts and notes.")
                         .appFont(.caption)
@@ -626,6 +626,7 @@ struct SettingsView: View {
                             Text(engine.displayName).tag(engine.rawValue)
                         }
                     }
+                    .appFont(.body)
                     if transcriptionEngine == AppSettings.TranscriptionEngine.gemini.rawValue,
                        apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Label("Gemini (Cloud) transcription needs a Gemini API key — add one in the LLM Provider section below.",
@@ -649,7 +650,7 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } header: {
-                    Text("Transcription")
+                    sectionHeader("Transcription")
                 } footer: {
                     Text(transcriptionEngineBlurb)
                         .appFont(.caption)
@@ -659,7 +660,7 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Section("LLM Provider") {
+                Section {
                     if configuredProviders.isEmpty {
                         Text("Add an API key below — the provider you configure becomes the default.")
                             .appFont(.caption)
@@ -673,6 +674,7 @@ struct SettingsView: View {
                                 Text(provider)
                             }
                         }
+                        .appFont(.body)
                     }
 
                     Picker(selection: $selectedTab) {
@@ -696,6 +698,7 @@ struct SettingsView: View {
                                 Text(name)
                             }
                         }
+                        .appFont(.body)
                         Text("Applies to note generation. Transcription always uses \(AppSettings.transcriptionModel) — the cheapest tier that handles audio.")
                             .appFont(.caption)
                             .foregroundStyle(.secondary)
@@ -712,6 +715,7 @@ struct SettingsView: View {
                                 Text(name)
                             }
                         }
+                        .appFont(.body)
                         textOnlyProviderNote("Claude")
                     } else if selectedTab == "DeepSeek" {
                         SecureField("API Key", text: $deepseekAPIKey)
@@ -723,6 +727,7 @@ struct SettingsView: View {
                                 Text(name)
                             }
                         }
+                        .appFont(.body)
                         textOnlyProviderNote("DeepSeek")
                     } else {
                         Text("\(selectedTab) support is coming soon.")
@@ -733,12 +738,14 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 6)
                     }
+                } header: {
+                    sectionHeader("LLM Provider")
                 }
 
                 Section {
                     Toggle("Transcribe and generate notes automatically", isOn: $automaticMode)
                 } header: {
-                    Text("Automatic Mode")
+                    sectionHeader("Automatic Mode")
                 } footer: {
                     Text("As soon as you stop a recording, Dosa transcribes it and generates notes — no need to press Generate Notes. Because this can finish while you're in another note or another app, Dosa tells you when the notes are ready with an in-app message or a notification.")
                         .appFont(.caption)
@@ -758,7 +765,7 @@ struct SettingsView: View {
                     NotesStyleSlider(level: $verbosity)
                         .padding(.vertical, 4)
                 } header: {
-                    Text("Notes Style: \(AppSettings.verbosityLevelNames[min(max(verbosity, 0), 4)])")
+                    sectionHeader("Notes Style: \(AppSettings.verbosityLevelNames[min(max(verbosity, 0), 4)])")
                 } footer: {
                     Text("Controls how succinct or detailed generated notes are. Fills the {{verbosity}} placeholder in the prompt below.")
                         .appFont(.caption)
@@ -835,7 +842,7 @@ struct SettingsView: View {
                         .appFont(.caption)
                     }
                 } header: {
-                    Text("Notifications")
+                    sectionHeader("Notifications")
                 } footer: {
                     Text("Dosa tells you when a recording is saved and when generated notes are ready. macOS banners only appear when Dosa isn't the active app — while you're in Dosa you'll get an in-app message instead.")
                         .appFont(.caption)
@@ -877,22 +884,24 @@ struct SettingsView: View {
                         Text("Light").tag("light")
                         Text("Dark").tag("dark")
                     }
+                    .appFont(.body)
                     .onChange(of: appearance) { _, _ in
                         AppSettings.applyAppearance()
                     }
                     Picker("Font", selection: $fontFamily) {
                         ForEach(AppFontChoice.allCases) { choice in
                             Text(choice.displayName)
-                                .font(Typography.font(.body, choice: choice))
+                                .font(Typography.font(.body, choice: choice)) // system-font: each row previews its own face
                                 .tag(choice.rawValue)
                         }
                     }
+                    .appFont(.body)
                     Text("The quick brown fox jumps over the lazy dog.")
                         .appFont(.body)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } header: {
-                    Text("Theme")
+                    sectionHeader("Theme")
                 } footer: {
                     Text("Each theme is a matched palette for buttons, icons, backgrounds, and highlights. The accent, Dosa-notes, and font choices apply on top of any theme. Code, timers, and API keys stay monospaced.")
                         .appFont(.caption)
@@ -917,7 +926,7 @@ struct SettingsView: View {
                         Spacer()
                     }
                 } header: {
-                    Text("Backup")
+                    sectionHeader("Backup")
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Exports your settings as a JSON file you can import into Dosa on another machine. API keys, Notion credentials, and Google Calendar tokens are not included — reconnect those separately on the other machine.")
@@ -941,6 +950,7 @@ struct SettingsView: View {
             .formStyle(.grouped)
         }
         .frame(width: 600, height: 660)
+        .appFontScope()
         .onAppear {
             model = AppSettings.resolveModel(model)
             deepseekModel = AppSettings.resolveDeepSeekModel(deepseekModel)
@@ -985,6 +995,7 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(width: 480)
+        .appFontScope()
     }
 
     private func colorSwatch(_ name: String) -> some View {
@@ -1083,6 +1094,13 @@ struct SettingsView: View {
                 }
             }
         )
+    }
+
+    /// Grouped-Form section headers derive their smaller, heavier look from the
+    /// default text style — once `appFontScope` sets an explicit environment font
+    /// on the body, they need their own explicit role to keep that look.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title).appFont(.subheadline, weight: .semibold)
     }
 
     private func promptGroupLabel(_ title: String, isExpanded: Binding<Bool>) -> some View {

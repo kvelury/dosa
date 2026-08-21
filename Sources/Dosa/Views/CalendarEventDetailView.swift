@@ -99,6 +99,7 @@ struct CalendarEventDetailView: View {
         }
         .modifier(SizingModifier(style: style))
         .background(Theme.current.editorBackgroundColor)
+        .appFontScope()
     }
 
     private var timeSummary: String {

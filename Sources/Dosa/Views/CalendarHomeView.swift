@@ -124,6 +124,7 @@ struct CalendarHomeView: View {
                         Task { await calendar.refresh() }
                     }
                     .controlSize(.small)
+                    .appFont(.subheadline)
                 }
             }
         }

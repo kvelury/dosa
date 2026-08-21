@@ -2,7 +2,7 @@
 
 **App**: Dosa, a native macOS meeting-notes app
 **Source**: `~/Desktop/DosaApp`
-**Version**: 1.6 · macOS 14+ · Swift 5.9 language mode (built with Swift 6.1 toolchain)
+**Version**: 1.6.1 · macOS 14+ · Swift 5.9 language mode (built with Swift 6.1 toolchain)
 **Audience**: This doc is the canonical reference for continuing development (human or Claude). It captures architecture, implementation details, design decisions, and gotchas discovered during development.
 
 ---
@@ -122,12 +122,12 @@ The menu bar's recording item toggles: **Stop Recording** while a capture is run
 
 ### 2d. Releases & in-app updates
 
-No version number is bumped per commit (`CFBundleShortVersionString` stays `1.6` across many SHAs), so freshness is the **git commit** the running app was built from versus the latest GitHub Release.
+No version number is bumped per commit (`CFBundleShortVersionString` stays `1.6.1` across many SHAs), so freshness is the **git commit** the running app was built from versus the latest GitHub Release.
 
 **CI** (`.github/workflows/release.yml`): on every push to `main` (and `workflow_dispatch`), a `macos-26` runner — pinned, not `macos-latest`, because the runner's SDK decides whether `#if canImport(FoundationModels)` in `SharedViews.swift` compiles Liquid Glass or the pre-26 fallback — asserts that `FoundationModels.framework` is in the SDK, builds with `DOSA_RELEASE_BUILD=1`, verifies the stamp equals `github.sha`, the channel is `release`, `codesign --verify --strict` still holds (so stamping did not run after signing), and `Resources/Info.plist` is untouched, then publishes:
 
-- Tag: `build-<UTC yyyymmdd-HHMMSS>-<short sha>` (time-led, not `v1.6-…`, because the marketing version does not move per commit).
-- Title: `Dosa 1.6 (<short sha>)`. Body: `--generate-notes`. `--latest` so `/releases/latest` is unambiguous.
+- Tag: `build-<UTC yyyymmdd-HHMMSS>-<short sha>` (time-led, not `v1.6.1-…`, because the marketing version does not move per commit).
+- Title: `Dosa 1.6.1 (<short sha>)`. Body: `--generate-notes`. `--latest` so `/releases/latest` is unambiguous.
 - Assets: `Dosa.app.zip` (`ditto -c -k --keepParent`) and `manifest.json`.
 
 **Why `manifest.json` rather than `target_commitish`.** GitHub documents `target_commitish` as the value that determines where the tag is created from, not as a record of what was built; once the tag exists the API may echo the branch name instead of the SHA. Resting the updater's identity check on that field is not a contract. A SHA in the tag name as the *sole* source can carry only one fact; adding a second later means changing the tag grammar and breaking old parsers. The manifest carries `schemaVersion`, the full commit, `sha256` (the only integrity check available for an unsigned download), `arch` (`lipo -archs`, comma-separated), `commitDate`, and `minimumSystemVersion`, and it is fetched from the CDN so it does not consume the 60/hr unauthenticated API budget. `--target` is still passed for the web UI; nothing in the app reads it. The short SHA in the tag is belt-and-braces: if `tag_name` ends in our own short SHA we are up to date and skip both the manifest fetch and `/compare`.
@@ -355,9 +355,18 @@ Full-document restyle on every change (cheap at note scale). Per line: headings 
 - `Theme.swift`: `ThemePalette` tokens — `accent`, `highlight`, `highlightDeep` (welcome-glyph gradient bottom), `editorBackground`, `cardFill`, `codeSpan`, `defaultDosaColorName` — every token a dynamic `NSColor(name:nil){appearance…}` with light/dark variants. Five presets: **Classic** (blue/orange/system), **Crepe** (espresso/caramel/cream — deliberately hue-separated from Masala), **Masala** (red-orange/saffron), **Chutney** (greens/mint), **Slate** (graphite/steel).
 - Overrides on top of any preset: **Accent Override** (Blue/Purple/Pink/Green/Graphite — red excluded deliberately; it means destructive/record) and **Dosa Notes Color** (Grey/Purple/Red/Dark Blue/Dark Green + "Theme Default" which follows the preset; stored value "Theme Default" or unset ⇒ preset default via `AppSettings.currentDosaColorName`).
 - Application: root `.tint(Theme.current.accentColor)` in ContentView (covers selection, sliders, pickers, chips, links); explicit `Theme.current.*` reads for play button, backgrounds, stat cards, key-cap chips, markdown bullet/code colors, search-match highlight, welcome gradient.
-- **Typography**: `Typography.swift` catalogs 10 macOS-installed faces (System / SF Pro, System Rounded, New York, Avenir Next, Helvetica Neue, Charter, Baskerville, Gill Sans, Optima, Palatino). Stored under `AppSettings.fontFamilyKey`, default System. Custom SwiftUI UI uses `.appFont` / `.appMonoFont` (each modifier observes the setting so the change is live); the AppKit editor uses `Typography.nsFont` for body and headings. Code, timers, API keys, and shortcut glyphs stay on the system monospaced face. SF Symbol `.font` calls stay on the system face so symbols keep rendering. macOS-owned menus, toolbar control metrics, notifications, and the OAuth HTML page are not restyled. If a named family is missing or disabled, resolution falls back to the system font.
+- **Typography**: `Typography.swift` catalogs 10 macOS-installed faces (System / SF Pro, System Rounded, New York, Avenir Next, Helvetica Neue, Charter, Baskerville, Gill Sans, Optima, Palatino). Stored under `AppSettings.fontFamilyKey`, default System. The chosen face is the **inherited default** for every app-drawn surface: `appFontScope(_:)`, applied once at the root of each surface (the main window's content, and each sheet/popover), sets it as an environment font that descendants pick up automatically — the same mechanism `.appFont` / `.appMonoFont` use to set a role on top of it for one element (each modifier observes the setting so the change is live). The AppKit editor uses `Typography.nsFont` for body and headings. Code, timers, API keys, and shortcut glyphs stay on the system monospaced face. `Scripts/check-typography.sh`, run from `build.sh`, enforces both halves of this: every surface root still calls `appFontScope`, and no other view reaches for a raw `.font(` call (a `// system-font: <reason>` comment is the documented escape hatch for a deliberate exception, e.g. `SettingsView`'s Font-menu rows, which must each preview their own face rather than the active one).
+
+  **Surfaces that do not inherit it, and cannot be restyled** — SwiftUI's `.font()` environment value only reaches views SwiftUI itself draws:
+  - **NSMenu-drawn surfaces** — contextual menus, the editor's ⋯ menu and the sidebar's ＋ menu, `QuickSettingsPanel`'s model menu, `MenuBarExtra`, and `.commands` (`DosaApp.swift`, `RecordingCommand.swift`).
+  - **NSAlert** — `.alert` and `.confirmationDialog`: both their message text and their buttons.
+  - **NSPopUpButton / NSSegmentedControl** — a `Picker`'s displayed value and its menu items, and segmented pickers (My Notes/Dosa Notes, the LLM provider tabs). Only the Form row *label* beside a `Picker` is SwiftUI-drawn and gets fonted.
+  - `.help()` tooltips, `NSOpenPanel` / `NSSavePanel`, `DatePicker(.graphical)`, notification banners, the window title and toolbar control metrics, and the OAuth HTML page.
+  - SF Symbol `.font(.system(size:))` calls stay on the system face so symbols keep rendering.
+
+  If a named family is missing or disabled, resolution falls back to the system font.
 - **Not themeable by design**: body text color (system label colors), destructive red, the floating overlays' translucent chrome (floating bar / toasts — see `FloatingChrome` in §9c), the titlebar row's glass pills (their *glyphs* can be tinted — the back arrow is — but the pills themselves are the system's), sidebar material.
-- **Refresh model**: views re-render via `@AppStorage` observation of the theme keys, editors re-style via `Theme.styleFingerprint` comparison, and — the sledgehammer that guarantees "everything at once" — closing Settings bumps `AppState.themeRefreshTick`, and ContentView has `.id(appState.themeRefreshTick)` on the NavigationSplitView, rebuilding the whole tree. Side effect: sidebar disclosure state resets after Settings closes. Font changes additionally live-update: `.appFont` / `.appMonoFont` modifiers observe `fontFamily` directly, and the markdown editor restyles when the fingerprint's font component changes. `AppSettings.applyAppearance()` maps the Appearance picker (auto/light/dark) to `NSApp.appearance`, applied on change and at launch.
+- **Refresh model**: views re-render via `@AppStorage` observation of the theme keys, editors re-style via `Theme.styleFingerprint` comparison, and — the sledgehammer that guarantees "everything at once" — closing Settings bumps `AppState.themeRefreshTick`, and ContentView has `.id(appState.themeRefreshTick)` on the NavigationSplitView, rebuilding the whole tree. Side effect: sidebar disclosure state resets after Settings closes. Font changes additionally live-update: `appFontScope` / `.appFont` / `.appMonoFont` modifiers all observe `fontFamily` directly, and the markdown editor restyles when the fingerprint's font component changes. `AppSettings.applyAppearance()` maps the Appearance picker (auto/light/dark) to `NSApp.appearance`, applied on change and at launch.
 
 ---
 
@@ -429,7 +438,7 @@ The last round of this produced a toggle floating in the vertical middle of the 
 
 **Do:** for edge-to-edge content in the detail pane, `.toolbarBackground(.hidden, for: .windowToolbar)` + `.background(...).ignoresSafeArea(edges: .top)` — the two lines above. If a view sits too high or too low, adjust *that view's* padding, and keep it inside normal layout flow (a top-anchored `VStack`/overlay reaching into the titlebar region is how the Welcome greeting ended up jammed against the window edge) — never touch the window.
 
-**Enforcement:** `Scripts/check-window-chrome.sh` fails the build on every forbidden API above; `build.sh` runs it before compiling. If it fires, the fix is to delete the offending call, not to add an exception.
+**Enforcement:** `Scripts/check-window-chrome.sh` fails the build on every forbidden API above; `build.sh` runs it before compiling. If it fires, the fix is to delete the offending call, not to add an exception. `build.sh` also runs `Scripts/check-typography.sh` right after it — same grep-level approach, enforcing the font coverage described in §8's Typography bullet.
 
 **Required verification for any UI-touching change:** `./build.sh`, quit any running Dosa, `open build/Dosa.app`, and confirm the invariants above against a known-good window. Collapse and reopen the sidebar, and resize the window.
 

@@ -302,6 +302,23 @@ extension View {
             mono: true
         ))
     }
+
+    /// Makes the user's chosen face the inherited default for this whole subtree.
+    /// Every descendant that does not set its own font — `Text`, `Button` and
+    /// `Toggle` labels, `TextField` content, `Link`, `Label` — renders in it, and
+    /// re-renders live when the setting changes.
+    ///
+    /// Apply once at the root of each surface (window content, sheet, popover).
+    /// AppKit-drawn surfaces (menus, alerts, popup/segmented pickers) do not
+    /// inherit it — see the Typography section of docs/TECHNICAL_DESIGN.md.
+    func appFontScope(_ role: Typography.Role = .body) -> some View {
+        modifier(AppFontModifier(
+            size: role.size,
+            weight: role.weight,
+            monospacedDigit: false,
+            mono: false
+        ))
+    }
 }
 
 /// In-process checks for the font catalog. Invoked by `DosaCalendarChecks`
@@ -315,6 +332,12 @@ public enum TypographySelfChecks {
                 fputs("FAIL Typography.swift:\(line): \(message)\n", stderr)
             }
         }
+
+        // appFontScope swaps only the face, not the size, on the assumption that
+        // .body already matches SwiftUI's macOS default (~13pt) — the thing that
+        // makes the swap layout-neutral for every previously-unfonted control.
+        // If .body's size ever moves, that assumption breaks silently; catch it here.
+        expect(Typography.Role.body.size == 13, "Role.body must stay 13pt — appFontScope assumes it matches SwiftUI's macOS default")
 
         expect(AppFontChoice.allCases.count == 10, "catalog should list 10 faces")
         expect(
