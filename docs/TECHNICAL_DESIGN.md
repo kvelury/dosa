@@ -9,7 +9,7 @@
 
 ## 1. What Dosa does
 
-Dosa records meeting audio **directly from the Mac** (no bot joins the call), lets the user take sparse manual notes in a live markdown editor, then uses the **configured LLM provider** (Gemini, Anthropic, or DeepSeek) to (1) transcribe the recording with speaker identification and (2) synthesize polished meeting notes anchored on the user's manual notes. (Only Gemini accepts audio; with Anthropic or DeepSeek selected, transcription falls to the engine chosen in Settings → Transcription.) Generated notes render with a deterministic word-level diff: the user's words in the primary text color, Dosa's additions in a configurable grey/color. Notes can be organized in nested folders, pinned, searched globally, exported to disk, and exported to a **Notion database** that Dosa creates automatically via Notion's hosted MCP server.
+Dosa records meeting audio **directly from the Mac** (no bot joins the call), lets the user take sparse manual notes in a live markdown editor, then uses the **configured LLM provider** (Gemini, Anthropic, or DeepSeek) to (1) transcribe the recording with speaker identification and (2) synthesize polished meeting notes anchored on the user's manual notes. (Only Gemini accepts audio; with Anthropic or DeepSeek selected, transcription falls to the engine chosen in Settings → Transcription.) Generated notes render with a deterministic word-level diff: the user's words in the primary text color, Dosa's additions in a configurable grey/color. Notes can be organized in nested folders, pinned, searched globally, exported to disk, exported to a **Notion database** that Dosa creates automatically via Notion's hosted MCP server, and — when Google Calendar is connected — created from upcoming meetings on a calendar homepage.
 
 Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), it works with any source: Zoom, Meet, Teams, Slack huddles, browser tabs, video files. Audio already captured elsewhere can be **imported** instead (§4.2) — after the import step nothing downstream distinguishes it from a recording.
 
@@ -17,7 +17,7 @@ Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), 
 
 ## 2. Build system & project layout
 
-**Swift Package (SPM), not Xcode project.** Built with `swift build`, assembled into a `.app` bundle by `build.sh`:
+**Swift Package (SPM), not Xcode project.** The runnable product is the `Dosa` executable (`Sources/DosaApp`); app code lives in the `DosaKit` library (`Sources/Dosa`) so the Calendar checks executable can import it. Built with `swift build`, assembled into a `.app` bundle by `build.sh`:
 
 1. `swift build -c release`
 2. Regenerates the brand assets via `Scripts/make_icon.swift`, unconditionally, every build (no longer guarded behind "if missing" — a stale icon/mark from before a source-SVG change is worse than the ~1s regeneration cost):
@@ -32,12 +32,15 @@ Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), 
 > **CALLOUT — TCC and ad-hoc signing**: every rebuild re-signs with a new ad-hoc identity, so macOS may re-prompt for Microphone, Screen & System Audio Recording, and notification authorization after rebuilds. This is expected. A real Developer ID cert would fix it.
 
 ```
-Sources/Dosa/
-  DosaApp.swift          @main App; AppState; Window + MenuBarExtra scenes; commands
+Sources/DosaApp/
+  DosaEntry.swift        @main trampoline that calls DosaApp.main()
+Sources/Dosa/            DosaKit library (app + tests)
+  DosaApp.swift          App; AppState; Window + MenuBarExtra scenes; commands
   AppSettings.swift      All UserDefaults keys, default prompts, verbosity, appearance
   Theme.swift            Preset palettes + accent override + styleFingerprint
   Models.swift           Note, Folder, TimeFormatting
-  NotesStore.swift       Persistence, folders, pins, trash, stats
+  NotesStore.swift       Persistence, folders, pins, trash, stats, calendar-note links
+  LoopbackHTTPServer.swift  Shared localhost OAuth callback listener
   AudioRecorder.swift    Mic + system-audio capture, m4a mixdown, level/menu-icon metering
   RecordingImporter.swift  File picker, format gate, and import error mapping
   AudioPlayer.swift      Playback with pause/seek/progress
@@ -54,6 +57,14 @@ Sources/Dosa/
     NotionAuth.swift     OAuth 2.1: discovery, DCR, PKCE, loopback HTTP server
     NotionMCPClient.swift  Minimal MCP client (JSON-RPC + SSE over Streamable HTTP)
     NotionManager.swift  Connection state, Dosa Notes DB, export, tolerant parsing
+  GoogleCalendar/
+    GoogleCalendarAuth.swift     Desktop OAuth + PKCE + Keychain tokens
+    GoogleCalendarClient.swift   Calendar REST list/events pagination
+    GoogleCalendarManager.swift  Connection, selection, hourly refresh, cache
+    CalendarEvent.swift          Meeting filter, dedupe, 30-day window, link safety
+    GoogleCalendarAPIModels.swift  Codable Google JSON + mapping
+    CalendarCache.swift          Application Support snapshot
+    GoogleCalendarKeychain.swift Generic-password token store
   Views/
     ContentView.swift    NavigationSplitView; selection bridging; theme tick
     SidebarView.swift    Multi-select list, pins, drag&drop, swipes, settings footer
@@ -65,11 +76,15 @@ Sources/Dosa/
     SettingsView.swift   All settings sections + export/import
     MenuBarMenu.swift    Windowless new/import/record/settings/quit actions
     QuickSettingsPanel.swift  Model + Notes Style panel inside the recording bar's pull-tab
-    WelcomeView.swift    Greeting, stats, shortcut hints
+    WelcomeView.swift    Greeting, stats, shortcut hints; HomeView router
+    CalendarHomeView.swift  Connected 30-day meeting list
+    CalendarEventDetailView.swift  Event popup: details, links, create/record
     DeletedNoteView.swift  Trash preview with restore/delete
-    SharedViews.swift    FloatingChrome, BackToWelcomeToolbar, TrailingToolbarItem, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
+    SharedViews.swift    FloatingChrome, banners, BackToWelcomeToolbar, TrailingToolbarItem, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
   Branding.swift         DosaMark PNGs + drawn menu-bar frames + DosaWatermark
+Sources/DosaCalendarChecks/  Calendar checks runnable without XCTest
 Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
+Resources/GoogleCalendarOAuth.json.example  Desktop OAuth client template (live file is gitignored)
 Resources/Branding/     Source SVGs (app icon, in-app mark, menu-bar templates — see §2b)
 build.sh / Scripts/make_icon.swift
 ```
@@ -113,6 +128,8 @@ struct Note {
   transcript: String?                                 // cached speaker-labeled transcript
   recordingFileName: String?  recordingDuration: TimeInterval?
   notionPageId: String?  notionPageURL: String?       // set on first Notion export
+  calendarEventUID: String?  calendarEventInstanceStart: Date?
+  calendarHTMLLink: String?  calendarID: String?      // one active note per calendar occurrence
   pinnedAt: Date?                                     // nil = unpinned; ordering key
   deletedAt: Date?                                    // nil = active; drives 30-day trash
 }
@@ -573,11 +590,23 @@ Storage: **UserDefaults** (`notionAccessToken/RefreshToken/TokenExpiry/ClientId/
 
 Per-note sync toggle (data-source destinations only); push = debounced `replace_content` + stored content hash; pull = `notion-fetch` page (returns markdown) on note-open/5-min timer/manual; hash-based echo-loop guard; last-writer-wins on divergence. Markdown round-trips are faithful for Dosa's subset.
 
+### 10.5 Google Calendar (REST, not MCP)
+
+Google's hosted Calendar MCP server requires a pre-registered OAuth client and is Developer Preview. Dosa talks to the **Calendar REST API** instead, with the same browser-consent UX as Notion:
+
+- **Auth** (`GoogleCalendarAuth`): installed-app authorization-code + PKCE, loopback ports 53690–53693, `access_type=offline` + `prompt=consent`, Keychain for access/refresh/expiry (`GoogleCalendarKeychain`, service `com.dosa.meetingnotes.google-calendar`). Scopes are `calendar.calendarlist.readonly` and `calendar.events.readonly` only. Disconnect best-effort revokes the token.
+- **Credentials**: a Dosa-owned Desktop OAuth client is injected at assemble time from untracked `Resources/GoogleCalendarOAuth.json` into `Info.plist` (`DOSAGoogleCalendarClientID` / `DOSAGoogleCalendarClientSecret`). Missing file → Calendar sign-in disabled; Settings explains. End users never paste client credentials.
+- **Sync** (`GoogleCalendarManager`): load `~/Library/Application Support/Dosa/calendar-cache.json`, refresh on launch/connect/calendar-selection change, every hour while running, and on wake/foreground when stale (≥1h). Paginated `events.list` per selected calendar with `singleEvents=true`, `orderBy=startTime`, `conferenceDataVersion=1`, `timeMin=now`, `timeMax=startOfDay(now)+30 calendar days`. Bounded concurrency (4). Transient/partial failures keep cached events. A 401 refreshes once; unrecoverable auth asks the user to reconnect.
+- **Meetings**: timed, not cancelled, user has not declined, and (another non-resource attendee **or** an http(s) meeting link). Excludes all-day / focusTime / outOfOffice / workingLocation / birthday. Shared invites are deduped by iCal UID + occurrence start, preferring the primary calendar.
+- **Home**: disconnected → existing `WelcomeView`. Connected → `CalendarHomeView` via `HomeView`, also used as the missing-note fallback in the editor and deleted-note views. Cards group the next 30 days; the popup shows a plain-text description (HTML stripped, no execution), validated http(s) links, Create Note, and Create & Start Recording Note. Template dropdowns are deferred.
+- **Notes**: optional `calendarEventUID` / `calendarEventInstanceStart` / `calendarHTMLLink` / `calendarID` on `Note`. Prefill title only — calendar description/attendees never enter `manualText` or AI prompts. One active linked note per occurrence; trashing detaches the link so restore cannot collide with a replacement.
+- **Banner**: first launch session that actually has Calendar credentials, disconnected home only, dismissible. Connecting, dismissing, or quitting that session sets `googleCalendarOnboardingFinished` so it never auto-returns.
+
 ---
 
 ## 11. Settings (`SettingsView.swift`)
 
-Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Automatic Mode** (one toggle → `automaticMode`, default off; §5.2) → **Notion** (§10) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Notifications** (§11b) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
+Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Automatic Mode** (one toggle → `automaticMode`, default off; §5.2) → **Notion** (§10) → **Google Calendar** (§10.5) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Notifications** (§11b) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
 
 - **Model and Notes Style are also reachable from the recording bar's quick-settings tab** (§9d),
   which writes the same UserDefaults keys through `@AppStorage` — the two views stay in lockstep in
@@ -587,7 +616,7 @@ Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) �
   be stored and never used. `AppSettings.availableModels(for:)` / `modelStorageKey(for:)` are the
   single provider-keyed lookups both views go through.
 - **Automatic Mode** gates itself on more than its own toggle: `AppSettings.automaticModeWillRun` also requires the credentials a run would need, mirroring `run`'s own two key checks. Both the enqueue guard and the "Recording saved — transcribing…" toast read that single property, so the toast can never promise work that will not happen.
-- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt, notificationsEnabled, automaticMode). **API keys & Notion state intentionally excluded**; import validates enum-ish fields and remaps retired models. `notificationsEnabled` and `automaticMode` are Optional so older exported JSON still decodes.
+- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt, notificationsEnabled, automaticMode). **API keys, Notion state, and Google Calendar tokens intentionally excluded**; import validates enum-ish fields and remaps retired models. `notificationsEnabled` and `automaticMode` are Optional so older exported JSON still decodes.
 - Closing Settings bumps `themeRefreshTick` (§8).
 
 > **CALLOUT — Form footer text on macOS 26 right-aligns wrapped lines** unless you add `.multilineTextAlignment(.leading)` (plus `.fixedSize(horizontal: false, vertical: true)` and a leading-aligned max-width frame). All footers here do this; keep the pattern for new ones. Similarly, a bare `Slider` or segmented `Picker` in a grouped Form gets shoved into the trailing "value column" (provider tabs hug the leading edge) — give it a hidden empty label + `.frame(maxWidth: .infinity)`.
@@ -656,6 +685,7 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 1. `./build.sh && open build/Dosa.app` — app launches, welcome shows stats + shortcut hints.
 1b. Window chrome intact: traffic lights at top-left, exactly one (system) sidebar toggle in the toolbar, sidebar full-height with no dead strip above its header. Collapse and reopen the sidebar. Welcome watermark + greeting with no white strip at the top of the detail pane.
 1c. Titlebar row: sidebar toggle, back arrow, and ⋯ menu all on one horizontal line at the same size. Back arrow absent on Welcome; present once a note (or a deleted note, or a multi-selection) is open, in both sidebar states; clicking it returns to Welcome. ⌘W still does the same thing, and File shows "Close Note" once. Every ⋯ menu item still works (exports, Notion, import, re-transcribe, discard, delete).
+1d. Google Calendar: first-launch banner only while disconnected, dismissible, gone after quit. Connect in Settings (browser) → homepage becomes the 30-day meeting list with today's date. Cards open the detail popup; Create Note / Create & Start Recording Note reuse one linked note; trashing that note allows a replacement. Disconnect restores Welcome. `swift run DosaCalendarChecks` covers filter/dedupe/cache/linking.
 2. Record (mic + play a video) → waveform bounces → stop → play with scrub bar.
 2b. Import: drag an `.mp4` onto a note, and repeat via ⌘O / sidebar `+` / ⋯ menu → play button with the right duration → Generate produces a transcript. Import onto a note that already has audio → prompt appears; "Import into a New Note" leaves the original untouched; after "Replace It" the previous `.m4a` is still in `Recordings/` under its old timestamped name.
 3. Generate Notes → sidebar row spinner → Dosa Notes tab with diff colors → Re-generate label; Stop mid-run cancels silently.

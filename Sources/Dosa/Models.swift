@@ -18,6 +18,10 @@ struct Note: Identifiable, Codable, Hashable {
     var recordingDuration: TimeInterval?
     var notionPageId: String?
     var notionPageURL: String?
+    var calendarEventUID: String?
+    var calendarEventInstanceStart: Date?
+    var calendarHTMLLink: String?
+    var calendarID: String?
     var pinnedAt: Date?
     var deletedAt: Date?
     /// Model and note-style used the last time Dosa generated notes for this

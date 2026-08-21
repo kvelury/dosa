@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var recorder: AudioRecorder
     @EnvironmentObject private var notifier: NotificationManager
+    @EnvironmentObject private var calendar: GoogleCalendarManager
     @State private var interruptionMessage: String?
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
@@ -55,7 +56,7 @@ struct ContentView: View {
                 } else if appState.selectedNoteIds.count > 1 {
                     MultiSelectionView(count: appState.selectedNoteIds.count)
                 } else {
-                    WelcomeView()
+                    HomeView()
                 }
             }
             .id(appState.themeRefreshTick)
@@ -82,6 +83,10 @@ struct ContentView: View {
                 .animation(.default, value: awayFromRecording)
             }
             .modifier(SetupBannerInset(onOpenSettings: { appState.showSettings = true }))
+            .modifier(CalendarSetupBannerInset(
+                isHomeVisible: !isShowingDetail,
+                onOpenSettings: { appState.showSettings = true }
+            ))
             // Hides the toolbar's material/separator, not the toolbar itself, so
             // the theme fill below paints edge-to-edge under that region while
             // the toolbar keeps its items. See §9b of the design doc.
@@ -126,6 +131,7 @@ struct ContentView: View {
         }
         .onAppear {
             AppSettings.applyAppearance()
+            calendar.start()
         }
         .tint(Theme.current.accentColor)
     }

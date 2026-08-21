@@ -48,6 +48,10 @@ enum AppSettings {
     static let notionTitlePropertyKey = "notionTitleProperty"
     static let notionDatabaseURLKey = "notionDatabaseURL"
 
+    static let googleCalendarAccountKey = "googleCalendarAccountEmail"
+    static let googleCalendarSelectedIDsKey = "googleCalendarSelectedCalendarIDs"
+    static let googleCalendarOnboardingFinishedKey = "googleCalendarOnboardingFinished"
+
     static let dosaColorOptions = ["Grey", "Purple", "Red", "Dark Blue", "Dark Green"]
 
     static var currentDosaColorName: String {

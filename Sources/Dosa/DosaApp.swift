@@ -56,8 +56,7 @@ final class AppState: ObservableObject {
     @Published var themeRefreshTick = 0
 }
 
-@main
-struct DosaApp: App {
+public struct DosaApp: App {
     static let mainWindowID = "main"
 
     @StateObject private var store = NotesStore()
@@ -67,9 +66,12 @@ struct DosaApp: App {
     @StateObject private var search = SearchCoordinator()
     @StateObject private var appState = AppState()
     @StateObject private var notion = NotionManager()
+    @StateObject private var calendar = GoogleCalendarManager()
     @StateObject private var notifier = NotificationManager()
 
-    var body: some Scene {
+    public init() {}
+
+    public var body: some Scene {
         Window("Dosa", id: Self.mainWindowID) {
             ContentView()
                 .environmentObject(store)
@@ -79,6 +81,7 @@ struct DosaApp: App {
                 .environmentObject(search)
                 .environmentObject(appState)
                 .environmentObject(notion)
+                .environmentObject(calendar)
                 .environmentObject(notifier)
                 .frame(minWidth: 940, minHeight: 620)
         }

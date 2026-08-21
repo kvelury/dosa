@@ -48,7 +48,7 @@ struct NoteEditorView: View {
         if let noteBinding = store.noteBinding(id: noteId) {
             editor(note: noteBinding)
         } else {
-            WelcomeView()
+            HomeView()
         }
     }
 

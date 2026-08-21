@@ -26,6 +26,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notion: NotionManager
+    @EnvironmentObject private var calendar: GoogleCalendarManager
     @EnvironmentObject private var notifier: NotificationManager
 
     @AppStorage(AppSettings.userNameKey) private var userName = ""
@@ -125,6 +126,107 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let notionError = notion.errorMessage {
                     Text(notionError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var googleCalendarSection: some View {
+        Section {
+            switch calendar.connectionState {
+            case .unavailable:
+                Text("This build of Dosa doesn’t include Google Calendar credentials. Add Resources/GoogleCalendarOAuth.json and rebuild.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .disconnected:
+                HStack {
+                    Button("Connect Google Calendar…") {
+                        calendar.connect()
+                    }
+                    Spacer()
+                }
+            case .connecting:
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Waiting for authorization in your browser…")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel") {
+                        calendar.cancelConnect()
+                    }
+                }
+            case .connected(let account):
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Connected as \(account)")
+                    Spacer()
+                    Button("Disconnect", role: .destructive) {
+                        calendar.disconnect()
+                    }
+                }
+                if calendar.calendars.isEmpty {
+                    Text("No calendars were returned for this account.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(calendar.calendars) { item in
+                        Toggle(isOn: Binding(
+                            get: { calendar.selectedCalendarIDs.contains(item.id) },
+                            set: { calendar.setCalendarSelected(item.id, selected: $0) }
+                        )) {
+                            HStack {
+                                Text(item.name)
+                                if item.isPrimary {
+                                    Text("Primary")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .disabled(calendar.selectedCalendarIDs.contains(item.id) && calendar.selectedCalendarIDs.count == 1)
+                    }
+                }
+                HStack {
+                    if calendar.isRefreshing {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Refreshing meetings…")
+                            .foregroundStyle(.secondary)
+                    } else if let last = calendar.lastSuccessfulSyncAt {
+                        Text("Last refresh \(last.formatted(date: .abbreviated, time: .shortened))")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Meetings haven’t synced yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Refresh") {
+                        Task { await calendar.refresh() }
+                    }
+                    .disabled(calendar.isRefreshing)
+                }
+            }
+        } header: {
+            Text("Google Calendar")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Connect your Google account in the browser. Dosa reads the next 30 days of meetings from the calendars you select and shows them on the home screen. At least one calendar must stay selected.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let calendarError = calendar.errorMessage {
+                    Text(calendarError)
                         .font(.caption)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.leading)
@@ -332,6 +434,8 @@ struct SettingsView: View {
 
                 notionSection
 
+                googleCalendarSection
+
                 Section {
                     // Shared with the floating bar's quick-settings panel, which
                     // writes the same key — the two are meant to be the same control.
@@ -477,7 +581,7 @@ struct SettingsView: View {
                     Text("Backup")
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Exports your settings as a JSON file you can import into Dosa on another machine. API keys are not included — enter them separately on the other machine.")
+                        Text("Exports your settings as a JSON file you can import into Dosa on another machine. API keys, Notion credentials, and Google Calendar tokens are not included — reconnect those separately on the other machine.")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.leading)

@@ -1,16 +1,38 @@
 import SwiftUI
 
+enum WelcomeGreeting {
+    static func text(userName: String) -> String {
+        let firstName = userName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespaces)
+            .first ?? ""
+        return firstName.isEmpty ? "Welcome to Dosa" : "Hi \(firstName), welcome to Dosa"
+    }
+
+    static var todayText: String {
+        Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+    }
+}
+
+struct HomeView: View {
+    @EnvironmentObject private var calendar: GoogleCalendarManager
+
+    var body: some View {
+        if calendar.isConnected {
+            CalendarHomeView()
+        } else {
+            WelcomeView()
+        }
+    }
+}
+
 struct WelcomeView: View {
     @EnvironmentObject private var store: NotesStore
     @AppStorage(AppSettings.userNameKey) private var userName = ""
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
 
     private var greeting: String {
-        let firstName = userName
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .components(separatedBy: .whitespaces)
-            .first ?? ""
-        return firstName.isEmpty ? "Welcome to Dosa" : "Hi \(firstName), welcome to Dosa"
+        WelcomeGreeting.text(userName: userName)
     }
 
     var body: some View {
