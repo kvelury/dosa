@@ -56,4 +56,46 @@ enum QuitGuard {
             NSApp.terminate(nil)
         }
     }
+
+    static func requestInstallUpdate(
+        recorder: AudioRecorder,
+        generator: GenerationManager,
+        appState: AppState,
+        extraWarnings: [String],
+        onProceed: @escaping () -> Void
+    ) {
+        let work = runningWork(
+            recorder: recorder,
+            generator: generator,
+            appState: appState
+        )
+
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = work.isEmpty
+            ? "Install this update and restart Dosa?"
+            : "Install update while Dosa is \(work.joined(separator: " and "))?"
+
+        var paragraphs: [String] = []
+        if !work.isEmpty {
+            paragraphs.append("""
+                Quitting stops it immediately. An interrupted recording is recovered the next \
+                time you open Dosa, but transcription, note generation, and imports will have \
+                to start over.
+                """)
+        }
+        paragraphs.append("""
+            Because Dosa is signed ad-hoc, macOS treats each new build as a different app. \
+            After the restart you'll be asked again for Microphone and Screen & System Audio Recording, \
+            and notifications may need re-approving.
+            """)
+        paragraphs.append(contentsOf: extraWarnings)
+        alert.informativeText = paragraphs.joined(separator: "\n\n")
+        alert.addButton(withTitle: "Install and Restart")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            onProceed()
+        }
+    }
 }

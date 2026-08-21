@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var recorder: AudioRecorder
     @EnvironmentObject private var notifier: NotificationManager
+    @EnvironmentObject private var updater: UpdateManager
     @State private var interruptionMessage: String?
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
@@ -127,6 +128,7 @@ struct ContentView: View {
         .onAppear {
             AppSettings.applyAppearance()
         }
+        .task { await updater.checkOnLaunch() }
         .tint(Theme.current.accentColor)
     }
 }

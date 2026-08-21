@@ -5,6 +5,7 @@ struct SidebarView: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var updater: UpdateManager
     @Binding var selectedNoteIds: Set<UUID>
 
     @State private var newFolderParentId: UUID?
@@ -106,9 +107,22 @@ struct SidebarView: View {
                 // minLength keeps the version off the label at the sidebar's
                 // 230pt minimum width.
                 Spacer(minLength: 8)
-                Text("v\(Self.appVersion)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 5) {
+                    if updater.available != nil {
+                        Button {
+                            appState.showSettings = true
+                        } label: {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.current.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .help("An update is available — open Settings to install it")
+                    }
+                    Text("v\(BuildInfo.shortVersion)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -157,9 +171,6 @@ struct SidebarView: View {
             Text("Notes, transcripts, and recordings will be gone forever. This cannot be undone.")
         }
     }
-
-    private static let appVersion =
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4"
 
     private var notesList: some View {
         List(selection: $selectedNoteIds) {

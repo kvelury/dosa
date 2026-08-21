@@ -10,8 +10,14 @@ enum AppSettings {
     static let accentOverrideKey = "accentOverride"
     static let notificationsEnabledKey = "notificationsEnabled"
     static let automaticModeKey = "automaticMode"
+    static let automaticUpdateCheckKey = "automaticUpdateCheck"   // Bool, default true
+    static let lastUpdateCheckKey      = "lastUpdateCheck"        // Double, timeIntervalSinceReferenceDate
 
     static var notificationsEnabled: Bool { bool(forKey: notificationsEnabledKey, default: true) }
+
+    static var automaticUpdateCheckEnabled: Bool {
+        bool(forKey: automaticUpdateCheckKey, default: true)
+    }
 
     /// Off by default: the shipped behavior is that nothing runs until the user
     /// presses Generate Notes.

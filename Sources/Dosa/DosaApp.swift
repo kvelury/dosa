@@ -69,6 +69,7 @@ struct DosaApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var notion = NotionManager()
     @StateObject private var notifier = NotificationManager()
+    @StateObject private var updater = UpdateManager()
 
     var body: some Scene {
         Window("Dosa", id: Self.mainWindowID) {
@@ -82,6 +83,7 @@ struct DosaApp: App {
                 .environmentObject(appState)
                 .environmentObject(notion)
                 .environmentObject(notifier)
+                .environmentObject(updater)
                 .frame(minWidth: 940, minHeight: 620)
         }
         .windowStyle(.hiddenTitleBar)
@@ -100,6 +102,12 @@ struct DosaApp: App {
                     appState.showSettings = true
                 }
                 .keyboardShortcut(",", modifiers: .command)
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    appState.showSettings = true
+                    updater.check()
+                }
             }
             CommandGroup(replacing: .appTermination) {
                 Button("Quit Dosa") {
