@@ -157,6 +157,7 @@ final class NotesStore: ObservableObject {
         note.calendarEventInstanceStart = nil
         note.calendarHTMLLink = nil
         note.calendarID = nil
+        note.calendarEventSnapshot = nil
         update(note)
     }
 
@@ -180,9 +181,31 @@ final class NotesStore: ObservableObject {
         note.calendarEventInstanceStart = event.identity.instanceStart
         note.calendarHTMLLink = event.googleCalendarURL?.absoluteString
         note.calendarID = event.calendarID
+        note.calendarEventSnapshot = event
         notes.insert(note, at: 0)
         scheduleSave()
         return note
+    }
+
+    /// Refreshes stored snapshots from the live calendar. Called as `calendar.events`
+    /// changes so a note keeps the latest title/time after the meeting scrolls out
+    /// of the sync window.
+    func refreshCalendarSnapshots(from events: [CalendarEvent]) {
+        var changed = false
+        for index in notes.indices {
+            guard let uid = notes[index].calendarEventUID,
+                  let instanceStart = notes[index].calendarEventInstanceStart else { continue }
+            guard let event = events.first(where: {
+                $0.identity.matches(uid: uid, instanceStart: instanceStart)
+            }) else { continue }
+            if notes[index].calendarEventSnapshot != event {
+                notes[index].calendarEventSnapshot = event
+                changed = true
+            }
+        }
+        if changed {
+            scheduleSave()
+        }
     }
 
     func restore(_ id: UUID) {

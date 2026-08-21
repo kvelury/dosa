@@ -22,10 +22,14 @@ struct Note: Identifiable, Codable, Hashable {
     var calendarEventInstanceStart: Date?
     var calendarHTMLLink: String?
     var calendarID: String?
+    /// The meeting as it looked when this note was linked to it. The calendar only
+    /// syncs 30 days forward, so the live event vanishes the moment the meeting
+    /// ends — this is what the editor's meeting chip reads from afterwards.
+    var calendarEventSnapshot: CalendarEvent?
     var pinnedAt: Date?
     var deletedAt: Date?
     /// Model and note-style used the last time Dosa generated notes for this
-    /// note, for display next to the "your notes / dosa additions" legend.
+    /// note, for the editor header's sparkle pill hover card.
     var generationModel: String?
     var generationStyle: String?
     var templateId: UUID?
