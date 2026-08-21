@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two pushes in quick succession: the newer commit's release is the one that
+# matters, so let it cancel the older run rather than racing to publish.
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    # Pinned, not macos-latest: the runner's SDK decides whether the
+    # `#if canImport(FoundationModels)` in SharedViews.swift compiles the Liquid
+    # Glass path or the pre-26 fallback. Asserted below.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Assert the SDK has FoundationModels (Liquid Glass gate)
+        run: |
+          SDK="$(xcrun --sdk macosx --show-sdk-path)"
+          echo "SDK: $SDK"; xcrun --sdk macosx --show-sdk-version
+          test -d "$SDK/System/Library/Frameworks/FoundationModels.framework" || {
+            echo "::error::SDK has no FoundationModels — this release would lose Liquid Glass on macOS 26."
+            exit 1
+          }
+
+      - name: Build
+        env:
+          DOSA_RELEASE_BUILD: "1"
+        run: ./build.sh
+
+      - name: Verify the stamp and the signature
+        run: |
+          PLIST=build/Dosa.app/Contents/Info.plist
+          STAMPED=$(/usr/libexec/PlistBuddy -c "Print :DosaBuildCommit" "$PLIST")
+          CHANNEL=$(/usr/libexec/PlistBuddy -c "Print :DosaBuildChannel" "$PLIST")
+          [ "$STAMPED" = "${{ github.sha }}" ] || { echo "::error::stamp $STAMPED != ${{ github.sha }}"; exit 1; }
+          [ "$CHANNEL" = "release" ] || { echo "::error::channel is $CHANNEL"; exit 1; }
+          # Catches a future edit that stamps the plist after codesign.
+          codesign --verify --strict --verbose=2 build/Dosa.app
+          git diff --quiet -- Resources/Info.plist || { echo "::error::build.sh dirtied the tracked Info.plist"; exit 1; }
+
+      - name: Package
+        id: pkg
+        run: |
+          # ditto, not zip: preserves symlinks, resource forks and the code
+          # signature. --keepParent puts Dosa.app at the archive root, which is
+          # what UpdateManager's staging step expects.
+          ditto -c -k --keepParent build/Dosa.app Dosa.app.zip
+          echo "sha256=$(shasum -a 256 Dosa.app.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "short=$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          echo "tag=build-$(date -u +%Y%m%d-%H%M%S)-$(echo '${{ github.sha }}' | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: Write manifest
+        run: |
+          PLIST=build/Dosa.app/Contents/Info.plist
+          cat > manifest.json <<EOF
+          {
+            "schemaVersion": 1,
+            "commit": "${{ github.sha }}",
+            "shortCommit": "${{ steps.pkg.outputs.short }}",
+            "commitDate": "$(/usr/libexec/PlistBuddy -c 'Print :DosaBuildDate' "$PLIST")",
+            "shortVersion": "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")",
+            "bundleVersion": "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")",
+            "bundleIdentifier": "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")",
+            "minimumSystemVersion": "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")",
+            "arch": "$(lipo -archs build/Dosa.app/Contents/MacOS/Dosa | tr ' ' ',')",
+            "asset": "Dosa.app.zip",
+            "sha256": "${{ steps.pkg.outputs.sha256 }}",
+            "signing": "adhoc"
+          }
+          EOF
+          cat manifest.json
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.pkg.outputs.tag }}" \
+            Dosa.app.zip manifest.json \
+            --title "Dosa $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Dosa.app/Contents/Info.plist) (${{ steps.pkg.outputs.short }})" \
+            --target "${{ github.sha }}" \
+            --latest \
+            --generate-notes

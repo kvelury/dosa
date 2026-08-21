@@ -33,7 +33,7 @@ open build/Dosa.app
 ./build.sh --install
 ```
 
-`build.sh` compiles the Swift package, regenerates the brand assets (app icon + in-app mark) from the source SVGs in `Resources/Branding/`, assembles `build/Dosa.app`, injects Google Calendar OAuth client credentials from `Resources/GoogleCalendarOAuth.json` when that file exists, and ad-hoc signs it. For quick iteration, `swift build` alone typechecks everything (but won't refresh the branding assets or produce a runnable `.app`). `swift run DosaCalendarChecks` exercises Calendar decoding, meeting filtering, cache fallback, and one-note-per-event linking. (The Command Line Tools toolchain this project builds with does not include XCTest.)
+`build.sh` compiles the Swift package, regenerates the brand assets (app icon + in-app mark) from the source SVGs in `Resources/Branding/`, assembles `build/Dosa.app`, injects Google Calendar OAuth client credentials from `Resources/GoogleCalendarOAuth.json` when that file exists, stamps that bundle with the git commit it was built from, and ad-hoc signs it. `build/` is generated and untracked. For a release-channel stamp locally, `DOSA_RELEASE_BUILD=1 ./build.sh` (refuses a dirty tree). For quick iteration, `swift build` alone typechecks everything (but won't refresh the branding assets or produce a runnable `.app`). `swift run DosaCalendarChecks` exercises Calendar decoding, meeting filtering, cache fallback, and one-note-per-event linking. (The Command Line Tools toolchain this project builds with does not include XCTest.)
 
 Google Calendar sign-in needs a Desktop OAuth client. Copy `Resources/GoogleCalendarOAuth.json.example` to `Resources/GoogleCalendarOAuth.json`, fill in the client ID and secret, and rebuild. That live file is gitignored. Builds without it still succeed; Settings will say Calendar is unavailable.
 
@@ -52,6 +52,14 @@ Installing is opt-in: `--install` quits any running copy, then replaces `/Applic
 4. **Automatic mode (optional)** — Settings → Automatic Mode, to transcribe and generate as soon as a recording stops instead of pressing Generate Notes each time. Off by default, and it stays off in practice until an API key is saved.
 5. **Notion (optional)** — Settings → Notion → Connect; approve in the browser and Dosa sets up the rest.
 6. **Google Calendar (optional)** — Settings → Google Calendar → Connect; approve in the browser, then pick calendars. The home screen switches to upcoming meetings. A one-time banner on first launch points here; you can dismiss it.
+
+## Updating
+
+Updates come from **GitHub Releases** — a new release is published for every commit to `main`, identified by git SHA rather than the marketing version string. Settings → Updates checks whether a newer commit is available, downloads the prebuilt `.app`, verifies it, and replaces the running copy in place.
+
+A permission re-prompt after updating is **expected**. Dosa is signed ad-hoc, so macOS treats each new build as a different app and will ask again for Microphone and Screen & System Audio Recording (notifications may need re-approving too). The Updates section and the install confirmation both warn about this before anything is replaced.
+
+Automatic checks on launch are on by default and stay silent unless an update exists, in which case a small badge appears next to the version in the sidebar. There is no notification or toast.
 
 ## Keyboard shortcuts
 
@@ -87,11 +95,13 @@ Sources/DosaApp/DosaEntry.swift      @main trampoline
 Sources/Dosa/                        DosaKit library
   DosaApp / AppSettings / Theme      app entry, settings registry, theming tokens
   Models / NotesStore                data model + debounced JSON persistence
+  NoteTemplates                      built-in and user note templates
   AudioRecorder / AudioPlayer        capture (mic + ScreenCaptureKit), mixdown, playback
   RecordingImporter                  file picker + format gate for imported audio/video
   GeminiClient / AnthropicClient /
     DeepSeekClient                   REST clients for the supported LLM providers
   GenerationManager                  transcribe→generate pipeline, provider routing
+  UpdateManager                      GitHub Releases check, download, install helper
   DiffEngine / SearchService         word diff, search + reveal machinery
   Notion/                            OAuth (DCR+PKCE), minimal MCP client, export logic
   GoogleCalendar/                    OAuth+Keychain, Calendar REST, hourly sync, homepage
@@ -115,7 +125,8 @@ Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into th
 - WebM and Ogg/Opus files can't be imported — AVFoundation can't demux those containers, so convert to `.m4a` or `.mp4` first. Any file with no readable audio track fails with a clear message and leaves the note untouched.
 - Import isn't cancellable once started, and very large video files are transcoded in full before the note updates.
 - Dosa remains a normal Dock app and also has a persistent menu-bar item. Its icon geometry comes from `dosa-menubarTemplate.svg` and `dosa-menubarRecordingTemplate.svg`; while recording, the two dashed rings counter-rotate around a fixed filled core. Menu actions can recreate the main window for new notes, imports, recording, and Settings.
-- Ad-hoc signing means permission grants can reset on rebuild.
+- Ad-hoc signing means permission grants can reset on rebuild, and **on every in-app update** — there is no Developer ID / notarization. That re-prompt is expected; see [Updating](#updating).
+- Released builds are **arm64-only**. An Intel Mac will not be offered an update (the updater refuses an incompatible slice rather than installing a bundle that cannot launch).
 - Notion sync is one-way (export/update); bi-directional sync is designed but not built (see the design doc §10.4).
-- Google Calendar uses the REST API (not Google's preview MCP server). Sign-in needs a Dosa-owned Desktop OAuth client in `Resources/GoogleCalendarOAuth.json` at build time, and Google's verification before broad distribution. Note templates / a Create Note dropdown are not part of this release.
+- Google Calendar uses the REST API (not Google's preview MCP server). Sign-in needs a Dosa-owned Desktop OAuth client in `Resources/GoogleCalendarOAuth.json` at build time, and Google's verification before broad distribution. Creating a note from a meeting prefills only the title — it does not apply a template or copy calendar description/attendees into the note.
 - The OpenAI provider tab in Settings is a stub; Gemini, Anthropic, and DeepSeek are the working providers.

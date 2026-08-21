@@ -95,11 +95,28 @@ final class NotesStore: ObservableObject {
     }
 
     @discardableResult
-    func createNote(in folderId: UUID? = nil, title: String = "") -> Note {
-        let note = Note(title: title, folderId: folderId)
+    func createNote(in folderId: UUID? = nil, title: String = "", template: NoteTemplate? = nil) -> Note {
+        var note = Note(title: title, folderId: folderId)
+        if let template {
+            note.title = title.isEmpty ? template.name : title
+            note.manualText = template.body
+            note.templateId = template.id
+            note.templateName = template.name
+            note.templateSeed = template.body
+        }
         notes.insert(note, at: 0)
         scheduleSave()
         return note
+    }
+
+    func applyTemplate(_ template: NoteTemplate, to id: UUID) {
+        guard var note = note(id: id) else { return }
+        note.templateId = template.id
+        note.templateName = template.name
+        note.templateSeed = template.body
+        let trimmed = note.manualText.trimmingCharacters(in: .whitespacesAndNewlines)
+        note.manualText = trimmed.isEmpty ? template.body : note.manualText + "\n\n" + template.body
+        update(note)
     }
 
     func update(_ note: Note) {

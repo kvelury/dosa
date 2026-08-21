@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct NoteEditorView: View {
     @EnvironmentObject private var store: NotesStore
+    @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var recorder: AudioRecorder
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var generator: GenerationManager
@@ -197,9 +198,16 @@ struct NoteEditorView: View {
                     if let model = current.generationModel, let style = current.generationStyle {
                         // Concatenated so the separator stays upright — italicizing
                         // a bar just makes it look like a stray slash.
-                        (Text(model.lowercased()).italic()
-                            + Text(" | ")
-                            + Text("style: \(style)".lowercased()).italic())
+                        let line: Text = {
+                            var line = Text(model.lowercased()).italic()
+                                + Text(" | ")
+                                + Text("style: \(style)".lowercased()).italic()
+                            if let template = current.templateName {
+                                line = line + Text(" | ") + Text("template: \(template)".lowercased()).italic()
+                            }
+                            return line
+                        }()
+                        line
                             .font(.system(size: 13))
                             .foregroundStyle(.tertiary)
                     }
@@ -555,6 +563,17 @@ struct NoteEditorView: View {
                 }
             }
             Divider()
+            Menu {
+                ForEach(templates.templates) { template in
+                    Button(template.name) { store.applyTemplate(template, to: noteId) }
+                }
+            } label: {
+                Label("Apply Template", systemImage: "list.bullet.rectangle")
+            }
+            .disabled(current.enhancedMarkdown != nil || templates.templates.isEmpty)
+            .help(current.enhancedMarkdown != nil
+                  ? "Notes have already been generated — manual notes are read-only"
+                  : "Add a template's sections to this note and tell the AI what kind of meeting it is")
             Button(action: startImport) {
                 Label("Import Audio or Video…", systemImage: "square.and.arrow.down")
             }

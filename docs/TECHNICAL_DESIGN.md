@@ -24,8 +24,11 @@ Because audio is intercepted at the OS level (ScreenCaptureKit loopback + mic), 
    - `Resources/AppIcon.icns`: rasterizes `Resources/Branding/dosa-icon-1024.svg` (brown tile, amber mark) via `NSImage(contentsOfFile:)` — verified pixel-accurate for this file's plain SVG feature set — then packages the usual resolution set with `sips` + `iconutil`.
    - `Resources/dosa-mark-{light,dark}.png`: rasterizes `Resources/Branding/dosa-mark-currentcolor.svg` (a template shape — solid black, transparent elsewhere) once, then tints it twice via `NSColor.set()` + `NSRect.fill(using: .sourceIn)` (the same alpha-preserving technique AppKit uses internally for `.isTemplate` images) — brown `#7A4512` for light appearance, amber `#E0A44E` for dark. Same brand pairing `dosa-mark-adaptive.svg` encodes via CSS, reproduced natively because that file's `@media (prefers-color-scheme:)` rules render inconsistently through `NSImage`/ImageIO (confirmed: mixed light/dark rule results within one raster) — not safe for native rendering.
 3. Assembles `build/Dosa.app/Contents/{MacOS/Dosa, Info.plist, Resources/{AppIcon.icns, dosa-mark-light.png, dosa-mark-dark.png}}`
-4. **Ad-hoc codesigns** (`codesign --force --sign -`)
-5. **Optionally installs** — only with `./build.sh --install`, which quits a running Dosa (replacing a live bundle leaves it half-broken), removes `/Applications/Dosa.app` rather than copying over it (so files dropped in a later version can't linger), and copies the fresh build in. Deliberately opt-in: the dev loop reruns this script constantly, and rewriting the installed bundle every time makes it ambiguous which copy is running and re-triggers the TCC prompts tied to that bundle.
+4. **Stamps** the *copy* of Info.plist already inside the bundle (never the tracked `Resources/Info.plist`) with `DosaBuildCommit` (full SHA, or empty when git is unavailable), `DosaBuildDate`, `DosaBuildChannel` (`release` when `DOSA_RELEASE_BUILD=1`, else `dev`), and `DosaBuildDirty`. **This must precede `codesign`** — PlistBuddy after signing breaks the seal, and the in-app updater verifies the signature of what it downloads. `DOSA_BUILD_COMMIT` overrides the stamped SHA so an older commit can be claimed for end-to-end updater tests without waiting on CI.
+5. **Ad-hoc codesigns** (`codesign --force --sign -`)
+6. **Optionally installs** — only with `./build.sh --install`, which quits a running Dosa (replacing a live bundle leaves it half-broken), removes `/Applications/Dosa.app` rather than copying over it (so files dropped in a later version can't linger), and copies the fresh build in. Deliberately opt-in: the dev loop reruns this script constantly, and rewriting the installed bundle every time makes it ambiguous which copy is running and re-triggers the TCC prompts tied to that bundle.
+
+`build/` is generated and gitignored. Released builds are published to GitHub Releases by `.github/workflows/release.yml` (§2d); there is nothing to gain from committing a binary that changes on every feature commit. `DOSA_RELEASE_BUILD=1 ./build.sh` refuses to run if git cannot name a commit or the tree is dirty.
 
 **Dev loop**: `swift build` to typecheck; `./build.sh && open build/Dosa.app` to ship. Kill the running app first (`pkill -x Dosa`).
 
@@ -41,6 +44,7 @@ Sources/Dosa/            DosaKit library (app + tests)
   Models.swift           Note, Folder, TimeFormatting
   NotesStore.swift       Persistence, folders, pins, trash, stats, calendar-note links
   LoopbackHTTPServer.swift  Shared localhost OAuth callback listener
+  NoteTemplates.swift    NoteTemplate model, TemplateStore, four built-in templates
   AudioRecorder.swift    Mic + system-audio capture, m4a mixdown, level/menu-icon metering
   RecordingImporter.swift  File picker, format gate, and import error mapping
   AudioPlayer.swift      Playback with pause/seek/progress
@@ -50,6 +54,7 @@ Sources/Dosa/            DosaKit library (app + tests)
   GenerationManager.swift  Transcribe→generate pipeline, cancellation, post-processing
   NotificationManager.swift  Recording-saved / notes-ready routing: toast if frontmost, macOS banner if not
   QuitGuard.swift        Busy-work detection + window-independent quit confirmation
+  UpdateManager.swift    GitHub Releases check, download, verify, detached install helper
   RecordingCommand.swift Start/stop recording from ⌘R, File menu, and the menu bar
   DiffEngine.swift       Tokenizer + attributed diff + Dosa-color registry
   SearchService.swift    Match finding, snippets, SearchCoordinator (reveal bus)
@@ -87,6 +92,7 @@ Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudio
 Resources/GoogleCalendarOAuth.json.example  Desktop OAuth client template (live file is gitignored)
 Resources/Branding/     Source SVGs (app icon, in-app mark, menu-bar templates — see §2b)
 build.sh / Scripts/make_icon.swift
+.github/workflows/release.yml  publish a GitHub Release for every commit to main
 ```
 
 ### 2b. Branding assets (`Resources/Branding/`, `Scripts/make_icon.swift`, `Branding.swift`)
@@ -113,6 +119,30 @@ The menu bar's recording item toggles: **Stop Recording** while a capture is run
 
 **Window chrome**: `.windowStyle(.hiddenTitleBar)` — no title bar; traffic lights overlay the sidebar's top-left, which is why the sidebar's icon row has `.padding(.top, 34)`. The sidebar toggle is `NavigationSplitView`'s own, left where macOS puts it; the only thing the app adds to that region is the back-to-home arrow (`BackToHomeToolbarItem`). Do not mutate the `NSWindow` to "finish" this look — see §9b.
 
+### 2d. Releases & in-app updates
+
+No version number is bumped per commit (`CFBundleShortVersionString` stays `1.4` across many SHAs), so freshness is the **git commit** the running app was built from versus the latest GitHub Release.
+
+**CI** (`.github/workflows/release.yml`): on every push to `main` (and `workflow_dispatch`), a `macos-26` runner — pinned, not `macos-latest`, because the runner's SDK decides whether `#if canImport(FoundationModels)` in `SharedViews.swift` compiles Liquid Glass or the pre-26 fallback — asserts that `FoundationModels.framework` is in the SDK, builds with `DOSA_RELEASE_BUILD=1`, verifies the stamp equals `github.sha`, the channel is `release`, `codesign --verify --strict` still holds (so stamping did not run after signing), and `Resources/Info.plist` is untouched, then publishes:
+
+- Tag: `build-<UTC yyyymmdd-HHMMSS>-<short sha>` (time-led, not `v1.4-…`, because the marketing version does not move per commit).
+- Title: `Dosa 1.4 (<short sha>)`. Body: `--generate-notes`. `--latest` so `/releases/latest` is unambiguous.
+- Assets: `Dosa.app.zip` (`ditto -c -k --keepParent`) and `manifest.json`.
+
+**Why `manifest.json` rather than `target_commitish`.** GitHub documents `target_commitish` as the value that determines where the tag is created from, not as a record of what was built; once the tag exists the API may echo the branch name instead of the SHA. Resting the updater's identity check on that field is not a contract. A SHA in the tag name as the *sole* source can carry only one fact; adding a second later means changing the tag grammar and breaking old parsers. The manifest carries `schemaVersion`, the full commit, `sha256` (the only integrity check available for an unsigned download), `arch` (`lipo -archs`, comma-separated), `commitDate`, and `minimumSystemVersion`, and it is fetched from the CDN so it does not consume the 60/hr unauthenticated API budget. `--target` is still passed for the web UI; nothing in the app reads it. The short SHA in the tag is belt-and-braces: if `tag_name` ends in our own short SHA we are up to date and skip both the manifest fetch and `/compare`.
+
+Released binaries are **arm64-only**. The updater refuses an incompatible slice rather than installing a bundle that cannot launch. Universal builds would be `swift build -c release --arch arm64 --arch x86_64` with a conditional copy from `.build/apple/Products/Release/Dosa`; out of scope.
+
+**In-app updater** (`UpdateManager.swift`): a manual Settings button plus a throttled (4 h, once per launch) check on start. Passive surfacing only — no toast, banner, or alert on discovery; a sidebar badge and the Settings section. Steady-state "up to date" is one API request (`GET /repos/kvelury/dosa/releases/latest`); the User-Agent `Dosa/<version>` is required (GitHub rejects requests without one). `/compare/{ours}...{theirs}` runs only when an update exists. A 404 on `/releases/latest` is "no release yet" (informational, not an error). Compare `behind` / `diverged` / 404 are informational notes, not failures — a developer's unpushed commit 404s and must not look like an error.
+
+Install sequence: preflight writability of the bundle's parent at *check* time (so the user is never asked to download 3 MB they cannot install) → stage into `url(for: .itemReplacementDirectory, appropriateFor: destination)` so the final move is an atomic `rename(2)` on the same volume → download with `URLSession.shared.bytes` → unpack with `/usr/bin/ditto -x -k` → verify (exactly one `.app`; zip SHA-256; `CFBundleIdentifier == com.dosa.meetingnotes`; executable bit; staged `DosaBuildCommit == manifest.commit`; `arch` runnable here; `codesign --verify --strict`; `minimumSystemVersion`) → one `QuitGuard.requestInstallUpdate` confirmation (busy work + ad-hoc/TCC warning + optional dev-checkout warning) → spawn a detached `/bin/sh` helper written to temp (never shipped inside the bundle being replaced — `sh` reads scripts incrementally) → dismiss Settings → terminate on the next runloop turn.
+
+The helper waits on the parent pid (`ps`, not `kill -0`, against pid reuse), strips `com.apple.quarantine` unconditionally (`ditto` round-trips xattrs, and an ad-hoc un-notarized app that arrives quarantined is refused at launch), `mv`s the live bundle aside then `mv`s the staged app into place, and on either `mv` failure restores and `open`s something so the user is never left with no app. Failures write `~/Library/Application Support/Dosa/update-failed.txt`, which `consumePreviousFailure()` surfaces in the Settings footer on the next launch. stdout/stderr go to `update-helper.log`.
+
+No privilege escalation. `/Applications` is `drwxrwxr-x root:admin`, so an admin account can write it; a standard account gets "Open Releases Page" instead of Install. Dev checkouts (`<repo>/build/Dosa.app`) are allowed with an explicit warning — `.git` is tested with `fileExists`, not `isDirectory`, because in a git worktree it is a file.
+
+**Caveat:** the helper runs with Dosa as its responsible process, so if the destination lives under a TCC-protected folder (a checkout on `~/Desktop` or `~/Documents`) macOS may raise a folder-access prompt at the moment of the swap — after Dosa has quit, so the prompt appears with no app behind it. `/Applications` is not TCC-protected.
+
 ---
 
 ## 3. Data model & persistence
@@ -132,6 +162,8 @@ struct Note {
   calendarHTMLLink: String?  calendarID: String?      // one active note per calendar occurrence
   pinnedAt: Date?                                     // nil = unpinned; ordering key
   deletedAt: Date?                                    // nil = active; drives 30-day trash
+  templateId: UUID?  templateName: String?            // templateName is stored redundantly so a rename/delete does not blank the editor legend
+  templateSeed: String?                               // scaffold snapshot at apply-time; generation uses it to drop unfilled headings that rule 1 would otherwise keep
 }
 ```
 
@@ -264,7 +296,11 @@ Pipeline per note: **transcribe (if no cached transcript) → generate**.
 
 ### 5.3 Prompt defaults (`AppSettings.swift`)
 
-The notes prompt implements the "bi-directional" architecture: manual notes are the anchor; rule 1 = include them **with only spelling/grammar corrected**; rule 3 = fixed sections (Summary ≤3 sentences, Key Points, Decisions, Action Items as checkboxes) + omit empty sections + model may add sections for topics that don't fit; rule 4 = `{{verbosity}}`; rule 6 = never repeat title/date, start at `## Summary`; rule 7 = formatting contract (dash bullets, sparse bold, no italics, no bare `*`).
+The notes prompt implements the "bi-directional" architecture: manual notes are the anchor; rule 1 = include them **with only spelling/grammar corrected**; rule 3 = use the sections named under "Note type" (`{{template_context}}`) + omit empty sections + model may add sections for topics that don't fit; rule 4 = `{{verbosity}}`; rule 5 = factual only — no invented facts, and **no judging, rating, or editorializing**: opinions and conclusions are attributed to the people in the meeting, never added by the model; rule 6 = never repeat title/date, start at the first section heading; rule 7 = formatting contract (dash bullets, sparse bold, no italics, no bare `*`).
+
+`{{template_context}}` is substituted **before** `{{user_name}}`, because the two interview templates embed `{{user_name}}` in their own prompt context ("a job interview that {{user_name}} is conducting" vs "in which {{user_name}} is the candidate"). Reverse that order and both ship with a raw `{{user_name}}` and start reading alike. Untemplated notes get `TemplateStore.defaultContext` (the old rule-3 section list, verbatim). If a stored custom prompt has no `{{template_context}}` placeholder, `withTemplateContext` **prepends** a `Note type:` block rather than appending — a transcript can run to tens of thousands of tokens and would bury an appended instruction. Settings shows a caption when that fallback is active.
+
+`TemplateStore.promptContext(for:)` always appends `TemplateStore.objectivityRule` to whatever context it returns — shipped template, user-written template, or `defaultContext`. Notes are a factual record: the model may not rate, score, or conclude anything of its own, and an assessment-shaped section (strengths, concerns, signals, recommendation) may only carry assessments a participant actually made or the user wrote down, attributed, and is dropped otherwise. It lives in code rather than in the editable template text for two reasons: a template's job is structure + context, so no edit to one should be able to turn a record into a verdict; and templates persisted before the rule existed would never pick it up if it shipped only inside `builtIns`. The shipped contexts are written to match (e.g. Interview (Hiring) hands "## Strengths"/"## Concerns"/"## Recommendation" to the interviewer and forbids a model-authored hire call).
 
 ---
 
@@ -606,7 +642,7 @@ Google's hosted Calendar MCP server requires a pre-registered OAuth client and i
 
 ## 11. Settings (`SettingsView.swift`)
 
-Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Automatic Mode** (one toggle → `automaticMode`, default off; §5.2) → **Notion** (§10) → **Google Calendar** (§10.5) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Notifications** (§11b) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup**.
+Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) → **Transcription** (engine dropdown Gemini (Cloud)/On-Device (Advanced)/On-Device (Basic) → `transcriptionEngine`; inline orange warnings when Gemini engine is picked without a Gemini key, or Advanced on a pre-26 macOS — the latter still saves but degrades to Basic at runtime) → **LLM Provider** (a **Default Provider** picker row at the top writes `llmProvider` and lists only providers with a saved key — `AppSettings.configuredProviders`; hidden behind a hint caption when no key is saved; self-heals on appear if the stored default lost its key. Below it, a segmented Gemini/Anthropic/OpenAI/DeepSeek control is UI-only `@State` for *editing* config — it opens on the default provider and never changes it. Gemini, Anthropic, and DeepSeek tabs = API key + link + model picker; Anthropic and DeepSeek add a shared `textOnlyProviderNote` caption pointing at the Transcription section; the OpenAI tab is a "coming soon" stub that resolves to Gemini at generation time) → **Automatic Mode** (one toggle → `automaticMode`, default off; §5.2) → **Notion** (§10) → **Google Calendar** (§10.5) → **Notes Style: \<level\>** (5-stop verbosity slider — level name lives in the section header; Dosa Notes Color swatches) → **Note Templates** (DisclosureGroup per template; built-ins Interview (Hiring) / Interview (Job Search) / 1:1 / Team Meeting plus user-created; Add Template / Restore Defaults; stored in UserDefaults `noteTemplates`. **Every template is deletable, built-ins included** — `builtInKey` only drives "Reset to Default" and lets Restore Defaults re-add a shipped one; a stored empty array therefore survives relaunch, and `TemplateStore.init` persists `builtIns` on first launch because they mint fresh UUIDs each process and a note's `templateId` would otherwise stop matching) → **Note Generation Prompt** / **Transcription Prompt** (DisclosureGroups, collapsed by default, whole label row toggles, "Reset to Default" buttons, placeholder hints) → **Notifications** (§11b) → **Theme** (preset cards with 3-dot palette previews, Accent Override swatches, Dosa color, Appearance picker) → **Backup** → **Updates**.
 
 - **Model and Notes Style are also reachable from the recording bar's quick-settings tab** (§9d),
   which writes the same UserDefaults keys through `@AppStorage` — the two views stay in lockstep in
@@ -616,7 +652,8 @@ Section order: **Profile** (Your Name → `{{user_name}}` + welcome greeting) �
   be stored and never used. `AppSettings.availableModels(for:)` / `modelStorageKey(for:)` are the
   single provider-keyed lookups both views go through.
 - **Automatic Mode** gates itself on more than its own toggle: `AppSettings.automaticModeWillRun` also requires the credentials a run would need, mirroring `run`'s own two key checks. Both the enqueue guard and the "Recording saved — transcribing…" toast read that single property, so the toast can never promise work that will not happen.
-- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt, notificationsEnabled, automaticMode). **API keys, Notion state, and Google Calendar tokens intentionally excluded**; import validates enum-ish fields and remaps retired models. `notificationsEnabled` and `automaticMode` are Optional so older exported JSON still decodes.
+- **Backup**: Export/Import Settings as JSON (`SettingsSnapshot`: userName, appearance, geminiModel, llmProvider, deepseekModel, anthropicModel, transcriptionEngine, notesVerbosity, theme, accentOverride, dosaNotesColor, notesPrompt, transcriptPrompt, notificationsEnabled, automaticMode, noteTemplates). **API keys, Notion state, and Google Calendar tokens intentionally excluded**; import validates enum-ish fields and remaps retired models. `notificationsEnabled`, `automaticMode`, and `noteTemplates` are Optional so older exported JSON still decodes — nil (the old-JSON case) is skipped, but an empty `noteTemplates` array is imported as-is, since "I deleted every template" is now a real state to restore. Update-check keys (`automaticUpdateCheck`, `lastUpdateCheck`) are machine-local and also excluded.
+- **Updates** (§2d): last section, after Backup — the most disruptive control, and the TCC warning reads as a closing note. Switches on `updater.state` (idle/upToDate identity row + Check; checking spinner; available commit list + Download; downloading progress; verifying; readyToInstall + prominent Install and Restart; installing). Always a "Check for updates when Dosa starts" toggle (`automaticUpdateCheck`, default true via `bool(forKey:default:)`) and a Releases link. Errors and recovered helper-failure text render in the footer like Notion connection errors. All progress stays inside the section — the Settings sheet covers ContentView's toast overlay (§14.20).
 - Closing Settings bumps `themeRefreshTick` (§8).
 
 > **CALLOUT — Form footer text on macOS 26 right-aligns wrapped lines** unless you add `.multilineTextAlignment(.leading)` (plus `.fixedSize(horizontal: false, vertical: true)` and a leading-aligned max-width frame). All footers here do this; keep the pattern for new ones. Similarly, a bare `Slider` or segmented `Picker` in a grouped Form gets shoved into the trailing "value column" (provider tabs hug the leading edge) — give it a hidden empty label + `.frame(maxWidth: .infinity)`.
@@ -650,7 +687,7 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 
 ## 13. Error handling
 
-- `DetailedError { errorDetail: String? }` — conformed by `GeminiError`, `AnthropicError`, `DeepSeekError`, and `NotionMCPClient.ClientError`; friendly `errorDescription` + raw payload separated.
+- `DetailedError { errorDetail: String? }` — conformed by `GeminiError`, `AnthropicError`, `DeepSeekError`, `NotionMCPClient.ClientError`, and `UpdateError`; friendly `errorDescription` + raw payload separated.
 - `ErrorDialogView` (sheet, not alert — alerts can't hold disclosure groups): warning icon, summary line, collapsed **"Show technical details"** (150 pt scrollable, selectable, monospaced raw body), OK. Presented from NoteEditorView via `errorPresented` binding that clears `localError(+Detail)` and `generator.errorMessage(+Detail, +NoteId)` on dismiss; Notion export errors are copied into the local pair. Notion *connection* errors render red in the Settings footer instead.
 - **A generation error is presented only by the note it belongs to** — `errorPresented` requires `generator.errorNoteId == noteId`. Without that gate, automatic mode (§5.2) would raise the sheet over whatever note happened to be open, and with no note open at all the error would never be shown *or* cleared and would then fire on the next note opened. The bug was latent before automatic mode (⌘W mid-run, then let it fail); automatic mode makes it routine.
 - Generation cancellations are silent by design.
@@ -679,6 +716,12 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 18. **Hiding the window toolbar killed traffic lights + sidebar toggle** — `.toolbar(.hidden, for: .windowToolbar)` plus an `NSWindow` `styleMask` poke (`HiddenTitleBarChrome`) collapsed the titlebar; the sidebar's traffic-light padding became a dead strip. This shipped once. Use `.toolbarBackground(.hidden, …)` instead — §9b.
 19. **Relocating `NavigationSplitView`'s sidebar toggle is a trap** — it sits near the split, not by the traffic lights, and that is standard macOS placement. A `ToolbarItem` replacement duplicates it; an overlay positioned from `standardWindowButton(.zoomButton)` is measured against the titlebar view, a sibling of SwiftUI's content view, and landed mid-sidebar with a dead strip on top. Both shipped. Leave the system toggle alone — §9b, enforced by `Scripts/check-window-chrome.sh`.
 20. **Recording-away toast is hidden behind sheets** — Settings, Global Search, Transcript, ErrorDialog, the confirmation dialogs. Sheets are modal and short-lived; the menu bar rings keep spinning. Do not hoist the toast above a sheet (that needs a window-level overlay or an `NSPanel`).
+21. **A running app cannot replace its own bundle safely** — the swap runs in a detached `/bin/sh` helper that waits on the parent pid; the script is written to temp, never shipped inside the bundle being replaced, because `sh` reads scripts incrementally — §2d.
+22. **`ditto` archives round-trip extended attributes**, so `xattr -dr com.apple.quarantine` runs in the helper before the swap — an ad-hoc-signed, un-notarized app that arrives quarantined is refused at launch — §2d.
+23. **Stamping must precede `codesign`** — PlistBuddy after signing breaks the seal and makes the updater's own `codesign --verify` fail. CI asserts this — §2, §2d.
+24. **Released binaries are arm64-only**; `manifest.json` carries `arch` and the updater refuses an incompatible slice — §2d.
+25. **`.git` is a *file* in a git worktree**, so dev-checkout detection uses `fileExists`, not `isDirectory` — §2d.
+26. **Updating re-triggers every TCC prompt** — same root cause as quirk 1, now user-facing. The install confirmation and the Updates footer both say so — §2d, §11.
 
 ## 15. Verification checklist (manual)
 
@@ -694,3 +737,9 @@ Menu-bar commands (also shown as key-cap hints at the bottom of the welcome page
 6. Sidebar: multi-select, drag into/out of folders, pin (section appears/disappears), swipe left/right, delete confirmations.
 7. Notion: Connect (browser) → Dosa Notes DB auto-created → Export → entry appears with Title/Date → edit + Update in Notion (no duplicate) → delete page/DB in Notion → export self-heals.
 8. Settings export/import round-trip on a second machine (API key & Notion excluded by design).
+9. `./build.sh` stamps `DosaBuildCommit` / `DosaBuildChannel` on the *bundle* copy of Info.plist; `codesign --verify --strict build/Dosa.app` exits 0; `git status --porcelain` is empty (proves `Resources/Info.plist` untouched and `build/` ignored). `DOSA_RELEASE_BUILD=1 ./build.sh` on a dirty tree hard-fails.
+10. Settings → Updates with no GitHub Release yet: "No release has been published yet." — plain text, not error styling, no sidebar badge. Offline manual check shows a footer error; relaunch is silent (no badge, no toast).
+11. After the first release: sidebar badge appears; Settings lists the commit count and subjects; Download → Install and Restart quits and relaunches; Settings shows the release's short SHA; no `.Dosa-update-*` or `.bak` left behind; `xattr -l` on the installed app shows no `com.apple.quarantine`.
+12. `DOSA_BUILD_COMMIT=<older sha> ./build.sh --install` is the escape hatch to exercise the update path against a release of a newer commit.
+13. Dev-checkout confirmation: launch `build/Dosa.app` directly, update → the alert names the checkout path. Busy guard: start a recording, hit Install → alert lists "recording audio"; Cancel leaves the recording running.
+14. Drag the sidebar split to its 230 pt minimum with the update badge showing — the version label must not clip.

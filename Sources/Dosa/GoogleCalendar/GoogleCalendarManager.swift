@@ -100,7 +100,9 @@ final class GoogleCalendarManager: ObservableObject {
         terminateObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.markOnboardingFinishedIfEligible()
+            Task { @MainActor in
+                self?.markOnboardingFinishedIfEligible()
+            }
         }
     }
 

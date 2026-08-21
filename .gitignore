@@ -1,9 +1,12 @@
 # Finder metadata
 .DS_Store
 
-# SwiftPM's build directory. Note that build/ is *not* ignored — the assembled
-# build/Dosa.app bundle is tracked on purpose (see docs/TECHNICAL_DESIGN.md).
+# SwiftPM's intermediate build directory and the assembled app bundle. Both are
+# generated; released builds are published to GitHub Releases by
+# .github/workflows/release.yml, so there is nothing to gain from committing a
+# binary that changes on every feature commit.
 /.build/
+/build/
 
 # Agent-to-agent handoff notes. Local scratch for whoever picks the work up next;
 # it describes uncommitted state, so it is never useful in a commit. Written only

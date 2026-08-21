@@ -6,6 +6,7 @@ struct ContentView: View {
     @EnvironmentObject private var recorder: AudioRecorder
     @EnvironmentObject private var notifier: NotificationManager
     @EnvironmentObject private var calendar: GoogleCalendarManager
+    @EnvironmentObject private var updater: UpdateManager
     @State private var interruptionMessage: String?
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
@@ -133,6 +134,7 @@ struct ContentView: View {
             AppSettings.applyAppearance()
             calendar.start()
         }
+        .task { await updater.checkOnLaunch() }
         .tint(Theme.current.accentColor)
     }
 }

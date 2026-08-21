@@ -60,6 +60,7 @@ public struct DosaApp: App {
     static let mainWindowID = "main"
 
     @StateObject private var store = NotesStore()
+    @StateObject private var templates = TemplateStore.shared
     @StateObject private var recorder = AudioRecorder()
     @StateObject private var player = AudioPlayer()
     @StateObject private var generator = GenerationManager()
@@ -68,6 +69,7 @@ public struct DosaApp: App {
     @StateObject private var notion = NotionManager()
     @StateObject private var calendar = GoogleCalendarManager()
     @StateObject private var notifier = NotificationManager()
+    @StateObject private var updater = UpdateManager()
 
     public init() {}
 
@@ -75,6 +77,7 @@ public struct DosaApp: App {
         Window("Dosa", id: Self.mainWindowID) {
             ContentView()
                 .environmentObject(store)
+                .environmentObject(templates)
                 .environmentObject(recorder)
                 .environmentObject(player)
                 .environmentObject(generator)
@@ -83,6 +86,7 @@ public struct DosaApp: App {
                 .environmentObject(notion)
                 .environmentObject(calendar)
                 .environmentObject(notifier)
+                .environmentObject(updater)
                 .frame(minWidth: 940, minHeight: 620)
         }
         .windowStyle(.hiddenTitleBar)
@@ -101,6 +105,12 @@ public struct DosaApp: App {
                     appState.showSettings = true
                 }
                 .keyboardShortcut(",", modifiers: .command)
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    appState.showSettings = true
+                    updater.check()
+                }
             }
             CommandGroup(replacing: .appTermination) {
                 Button("Quit Dosa") {
@@ -133,6 +143,7 @@ public struct DosaApp: App {
         MenuBarExtra {
             MenuBarMenu()
                 .environmentObject(store)
+                .environmentObject(templates)
                 .environmentObject(appState)
                 .environmentObject(recorder)
                 .environmentObject(generator)

@@ -20,14 +20,19 @@ private struct SettingsSnapshot: Codable {
     var transcriptPrompt: String?
     var notificationsEnabled: Bool?
     var automaticMode: Bool?
+    var noteTemplates: [NoteTemplate]?
 }
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var notion: NotionManager
     @EnvironmentObject private var calendar: GoogleCalendarManager
     @EnvironmentObject private var notifier: NotificationManager
+    @EnvironmentObject private var updater: UpdateManager
+    @EnvironmentObject private var recorder: AudioRecorder
+    @EnvironmentObject private var generator: GenerationManager
 
     @AppStorage(AppSettings.userNameKey) private var userName = ""
     @AppStorage(AppSettings.appearanceKey) private var appearance = "auto"
@@ -37,6 +42,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
     @AppStorage(AppSettings.notificationsEnabledKey) private var notificationsEnabled = true
     @AppStorage(AppSettings.automaticModeKey) private var automaticMode = false
+    @AppStorage(AppSettings.automaticUpdateCheckKey) private var automaticUpdateCheck = true
     @AppStorage(AppSettings.apiKeyKey) private var apiKey = ""
     @AppStorage(AppSettings.modelKey) private var model = AppSettings.defaultModel
     @AppStorage(AppSettings.llmProviderKey) private var defaultProvider = "Gemini"
@@ -51,6 +57,7 @@ struct SettingsView: View {
     @State private var backupStatus: String?
     @State private var notesPromptExpanded = false
     @State private var transcriptPromptExpanded = false
+    @State private var expandedTemplateIds: Set<UUID> = []
     @State private var selectedTab = "Gemini"
 
     private static let providers = ["Gemini", "Anthropic", "OpenAI", "DeepSeek"]
@@ -234,6 +241,291 @@ struct SettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var updatesSection: some View {
+        Section {
+            switch updater.state {
+            case .idle, .upToDate:
+                HStack {
+                    Text(currentBuildLabel)
+                    Spacer()
+                    Button("Check for Updates") {
+                        updater.check()
+                    }
+                }
+            case .checking:
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Checking GitHub…")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel") {
+                        updater.cancel()
+                    }
+                }
+            case .available(let update):
+                availableUpdateRows(update)
+            case .downloading(let progress):
+                HStack(spacing: 10) {
+                    if updater.downloadExpectedBytes > 0 {
+                        ProgressView(value: progress)
+                            .frame(maxWidth: 120)
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(downloadCaption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel") {
+                        updater.cancel()
+                    }
+                }
+            case .verifying:
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Verifying the download…")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            case .readyToInstall(let update):
+                if !updater.destinationWritable {
+                    notWritableRows(update)
+                } else {
+                    HStack {
+                        Button("Install and Restart") {
+                            confirmInstall()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Cancel") {
+                            updater.cancel()
+                        }
+                        Spacer()
+                    }
+                    Label("Because Dosa is signed ad-hoc, macOS treats each new build as a different app. After the restart you'll be asked again for Microphone and Screen & System Audio Recording, and notifications may need re-approving.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            case .installing:
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Restarting Dosa…")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+
+            if let statusNote = updater.statusNote {
+                Text(statusNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Toggle("Check for updates when Dosa starts", isOn: $automaticUpdateCheck)
+            Link("View releases on GitHub →", destination: UpdateManager.releasesPageURL)
+                .font(.caption)
+        } header: {
+            Text("Updates")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Updates are built from the latest commit on main and downloaded from GitHub Releases. Because Dosa is signed ad-hoc rather than with a Developer ID certificate, macOS treats each update as a new app — you'll be asked again for Microphone and Screen & System Audio Recording permission after installing.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let error = updater.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let previous = updater.previousFailure {
+                    Text(previous)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func availableUpdateRows(_ update: UpdateManager.Update) -> some View {
+        HStack {
+            Image(systemName: "arrow.down.circle.fill")
+            Text(update.commitCount > 0
+                 ? "\(update.commitCount) new commits available"
+                 : "An update is available")
+            Spacer()
+            if updater.destinationWritable {
+                Button("Download Update") {
+                    updater.downloadAndStage()
+                }
+            } else {
+                Button("Open Releases Page") {
+                    NSWorkspace.shared.open(update.releaseURL)
+                }
+            }
+        }
+        if !updater.destinationWritable {
+            notWritableCopy
+        }
+        ForEach(Array(update.subjects.enumerated()), id: \.offset) { _, subject in
+            Text(subject)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        if let compareURL = update.compareURL {
+            Link("View all changes on GitHub →", destination: compareURL)
+                .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func notWritableRows(_ update: UpdateManager.Update) -> some View {
+        notWritableCopy
+        Button("Open Releases Page") {
+            NSWorkspace.shared.open(update.releaseURL)
+        }
+    }
+
+    private var notWritableCopy: some View {
+        (Text("Dosa can't update itself here. ").fontWeight(.semibold)
+         + Text("\(Bundle.main.bundleURL.deletingLastPathComponent().path) can only be changed by an administrator on this Mac. Download the update and replace \(Bundle.main.bundleURL.path) yourself, or ask an admin."))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var currentBuildLabel: String {
+        var head = "Dosa \(BuildInfo.shortVersion)"
+        if !BuildInfo.shortCommit.isEmpty {
+            head += " (\(BuildInfo.shortCommit))"
+        }
+        var line = head
+        if let raw = BuildInfo.commitDate, let date = UpdateManager.parseISO8601(raw) {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMM d"
+            line += " · built \(formatter.string(from: date))"
+        }
+        if BuildInfo.isDirty {
+            line += " (uncommitted changes)"
+        }
+        return line
+    }
+
+    private var downloadCaption: String {
+        let received = updater.downloadReceivedBytes
+        let expected = updater.downloadExpectedBytes
+        if expected > 0 {
+            return "Downloading… \(byteCount(received)) of \(byteCount(expected))"
+        }
+        if received > 0 {
+            return "Downloading… \(byteCount(received))"
+        }
+        return "Downloading…"
+    }
+
+    private func byteCount(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    private func confirmInstall() {
+        var extra: [String] = []
+        if let root = BuildInfo.repoCheckoutRoot {
+            extra.append("Dosa is running from \(root.path)/build/Dosa.app. Installing overwrites that build output with the released one; your next `./build.sh` will overwrite it again.")
+        }
+        QuitGuard.requestInstallUpdate(
+            recorder: recorder,
+            generator: generator,
+            appState: appState,
+            extraWarnings: extra
+        ) {
+            updater.installAndRelaunch { dismiss() }
+        }
+    }
+
+    @ViewBuilder
+    private var templatesSection: some View {
+        Section {
+            ForEach($templates.templates) { $template in
+                DisclosureGroup(isExpanded: templateExpanded(template.id)) {
+                    TextField("Name", text: $template.name)
+                    Text("Sections prefilled into a new note")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    TextEditor(text: $template.body)
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(height: 140)
+                    Text("What the AI is told about this note type")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    TextEditor(text: $template.promptContext)
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(height: 120)
+                    HStack {
+                        if template.builtInKey != nil {
+                            Button("Reset to Default") {
+                                templates.resetToDefault(id: template.id)
+                            }
+                        }
+                        Spacer()
+                        Button("Delete", role: .destructive) {
+                            templates.delete(id: template.id)
+                        }
+                    }
+                } label: {
+                    promptGroupLabel(template.name, isExpanded: templateExpanded(template.id))
+                }
+            }
+            HStack {
+                Button("Add Template") {
+                    let created = templates.add()
+                    expandedTemplateIds.insert(created.id)
+                }
+                Spacer()
+                Button("Restore Defaults") {
+                    templates.restoreDefaults()
+                }
+            }
+        } header: {
+            Text("Note Templates")
+        } footer: {
+            Text("Templates appear under Templates in the ＋ menu in the sidebar. Choosing one prefills the note with its sections and tells the AI what kind of conversation it is, so the generated notes match. {{user_name}} works inside a template's AI context. Any template can be deleted, built-in ones included — Restore Defaults brings the four shipped templates back. A template only sets structure and context: generated notes stay a factual record either way, and never score or pass judgement on a conversation.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -452,19 +744,29 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                templatesSection
+
                 Section {
                     DisclosureGroup(isExpanded: $notesPromptExpanded) {
                         TextEditor(text: $notesPrompt)
                             .font(.system(size: 11, design: .monospaced))
                             .frame(height: 180)
                         HStack {
-                            Text("Placeholders: {{title}}, {{date}}, {{user_name}}, {{verbosity}}, {{manual_notes}}, {{transcript}}")
+                            Text("Placeholders: {{title}}, {{date}}, {{user_name}}, {{verbosity}}, {{template_context}}, {{manual_notes}}, {{transcript}}")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Button("Reset to Default") {
                                 notesPrompt = AppSettings.defaultNotesPrompt
                             }
+                        }
+                        if !notesPrompt.contains("{{template_context}}") {
+                            Text("Your customized prompt doesn't include `{{template_context}}` — template guidance will be added at the top of the prompt instead. Reset to Default to place it inline.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     } label: {
                         promptGroupLabel("Note Generation Prompt", isExpanded: $notesPromptExpanded)
@@ -596,6 +898,8 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
+                updatesSection
             }
             .formStyle(.grouped)
         }
@@ -701,6 +1005,19 @@ struct SettingsView: View {
         .help("\(name) theme")
     }
 
+    private func templateExpanded(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { expandedTemplateIds.contains(id) },
+            set: { expanded in
+                if expanded {
+                    expandedTemplateIds.insert(id)
+                } else {
+                    expandedTemplateIds.remove(id)
+                }
+            }
+        )
+    }
+
     private func promptGroupLabel(_ title: String, isExpanded: Binding<Bool>) -> some View {
         HStack {
             Text(title)
@@ -740,7 +1057,8 @@ struct SettingsView: View {
             notesPrompt: notesPrompt,
             transcriptPrompt: transcriptPrompt,
             notificationsEnabled: notificationsEnabled,
-            automaticMode: automaticMode
+            automaticMode: automaticMode,
+            noteTemplates: templates.templates
         )
         do {
             let encoder = JSONEncoder()
@@ -779,6 +1097,10 @@ struct SettingsView: View {
             if let value = snapshot.transcriptPrompt { transcriptPrompt = value }
             if let value = snapshot.notificationsEnabled { notificationsEnabled = value }
             if let value = snapshot.automaticMode { automaticMode = value }
+            // No `!value.isEmpty` guard: with built-ins deletable, "no templates" is a
+            // state worth exporting and restoring. Older JSON without the field decodes
+            // to nil and is still skipped.
+            if let value = snapshot.noteTemplates { templates.templates = value }
             AppSettings.applyAppearance()
             backupStatus = "Settings imported from \(url.lastPathComponent)."
         } catch {

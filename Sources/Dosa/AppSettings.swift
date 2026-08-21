@@ -10,8 +10,14 @@ enum AppSettings {
     static let accentOverrideKey = "accentOverride"
     static let notificationsEnabledKey = "notificationsEnabled"
     static let automaticModeKey = "automaticMode"
+    static let automaticUpdateCheckKey = "automaticUpdateCheck"   // Bool, default true
+    static let lastUpdateCheckKey      = "lastUpdateCheck"        // Double, timeIntervalSinceReferenceDate
 
     static var notificationsEnabled: Bool { bool(forKey: notificationsEnabledKey, default: true) }
+
+    static var automaticUpdateCheckEnabled: Bool {
+        bool(forKey: automaticUpdateCheckKey, default: true)
+    }
 
     /// Off by default: the shipped behavior is that nothing runs until the user
     /// presses Generate Notes.
@@ -77,6 +83,7 @@ enum AppSettings {
     static let anthropicModelKey = "anthropicModel"
     static let notesPromptKey = "notesPromptTemplate"
     static let transcriptPromptKey = "transcriptPromptTemplate"
+    static let noteTemplatesKey = "noteTemplates"
 
     /// Providers with a working integration; anything else stored under
     /// `llmProviderKey` (e.g. a "coming soon" tab) resolves to Gemini.
@@ -260,22 +267,25 @@ enum AppSettings {
     Beyond those corrections, do not change their wording, meaning, or order.
     2. Expand around those anchors: add context, names, numbers, decisions, and action items \
     drawn from the transcript.
-    3. Organize the result as clean Markdown with these sections: "## Summary" (2-3 sentences max), \
-    "## Key Points", "## Decisions", and "## Action Items" (as a checkbox list). Omit a section \
-    entirely if there is nothing for it. Weave the manual note lines into whichever sections they \
-    fit best. Add any sections as you see fit, if there is a topic that was discussed that does \
-    not fit into these sections.
+    3. Organize the result as clean Markdown, using the sections named under "Note type" below. \
+    Omit a section entirely if there is nothing for it. Weave the manual note lines into whichever \
+    sections they fit best. Add any sections as you see fit, if there is a topic that was discussed \
+    that does not fit into these sections.
     4. Length and depth: {{verbosity}}
     5. Be factual. Only use information found in the transcript or the manual notes. Never invent \
-    facts, and never pad with filler.
+    facts, and never pad with filler. Record what was said; never judge, rate, or editorialize. \
+    Opinions, impressions, and conclusions belong to the people in the meeting — attribute theirs, \
+    and add none of your own.
     6. Output pure Markdown with no code fences and no preamble. Do NOT repeat the meeting \
     title or date anywhere — the app already displays them above the notes. Begin directly \
-    with "## Summary".
+    with the first section heading.
     7. Formatting: use "-" for every bullet (never "*" or "+"). Use **bold** only sparingly \
     for names and key terms. Never use italics, and never use a bare "*" anywhere in prose.
 
     Meeting title: {{title}}
     Meeting date: {{date}}
+    Note type:
+    {{template_context}}
     The user (the person whose notes these are) is named {{user_name}} — refer to them by this \
     name, spelled exactly this way, wherever they come up.
 
