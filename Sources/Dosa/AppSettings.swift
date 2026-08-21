@@ -9,6 +9,7 @@ enum AppSettings {
     static let themeKey = "themeName"
     static let accentOverrideKey = "accentOverride"
     static let fontFamilyKey = "fontFamily"
+    static let textSizeKey = "textSize"
     static let notificationsEnabledKey = "notificationsEnabled"
     static let automaticModeKey = "automaticMode"
     static let automaticUpdateCheckKey = "automaticUpdateCheck"   // Bool, default true
@@ -83,6 +84,10 @@ enum AppSettings {
 
     static var currentFontChoice: AppFontChoice {
         AppFontChoice.resolved(UserDefaults.standard.string(forKey: fontFamilyKey) ?? "")
+    }
+
+    static var currentTextSize: AppTextSize {
+        AppTextSize.resolved(UserDefaults.standard.string(forKey: textSizeKey) ?? "")
     }
     static let apiKeyKey = "geminiAPIKey"
     static let modelKey = "geminiModel"

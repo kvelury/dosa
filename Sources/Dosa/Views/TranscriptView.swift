@@ -32,6 +32,7 @@ struct TranscriptView: View {
                 isEditable: false,
                 highlight: highlight
             )
+            .accessibilityLabel("Transcript")
         }
         .frame(minWidth: 560, idealWidth: 660, maxWidth: 900, minHeight: 460, idealHeight: 620, maxHeight: 900)
         .appFontScope()

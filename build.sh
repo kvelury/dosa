@@ -30,6 +30,9 @@ echo "==> Checking window chrome…"
 echo "==> Checking typography coverage…"
 ./Scripts/check-typography.sh
 
+echo "==> Checking accessibility coverage…"
+./Scripts/check-accessibility.sh
+
 echo "==> Building Dosa (release)…"
 swift build -c release
 

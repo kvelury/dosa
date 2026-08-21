@@ -119,7 +119,9 @@ enum SearchService {
             }
             var match = AttributedString(ns.substring(with: found))
             match.inlinePresentationIntent = .stronglyEmphasized
-            match.foregroundColor = Theme.current.highlightColor
+            // `highlightColor` measures as low as ~2.2:1 as text (Classic's
+            // systemOrange on white) — `accentTextColor` is the AA-adjusted token.
+            match.foregroundColor = Theme.current.accentTextColor
             result += match
             location = found.location + max(found.length, 1)
         }

@@ -70,12 +70,15 @@ struct QuickSettingsPanel: View {
         HStack(spacing: 10) {
             Text("Model")
                 .appFont(size: 12, weight: .medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
             Spacer(minLength: 8)
             if configuredProviders.isEmpty {
+                // This panel sits over the floating bar's translucent material,
+                // whose backdrop is unpredictable — `secondaryText`, not
+                // `tertiaryText`, is the floor for legible text here.
                 Text("No LLM configured")
                     .appFont(size: 12)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.secondaryTextColor)
             } else {
                 modelMenu
             }
@@ -126,13 +129,15 @@ struct QuickSettingsPanel: View {
         .fixedSize()
         .background(Capsule().fill(.quaternary.opacity(0.4)))
         .help("Model used to generate notes. Picking one also makes its provider the default.")
+        .accessibilityLabel("Model, \(activeModel)")
+        .accessibilityHint("Picking one also makes its provider the default")
     }
 
     private var notesStyleRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Notes Style: \(AppSettings.verbosityLevelNames[min(max(verbosity, 0), 4)])")
                 .appFont(size: 12, weight: .medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
             NotesStyleSlider(level: $verbosity)
                 .controlSize(.small)
         }

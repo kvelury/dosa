@@ -61,6 +61,41 @@ enum AppFontChoice: String, CaseIterable, Identifiable {
     }
 }
 
+/// The app-wide text-size multiplier (Settings ▸ Appearance ▸ Text Size).
+/// Satisfies WCAG 1.4.4 (Resize Text): every `Typography.Role` size scales by
+/// this factor, so a user who finds the default scale too small has a way to
+/// enlarge it without relying on macOS-wide display scaling.
+enum AppTextSize: String, CaseIterable, Identifiable {
+    case small
+    case regular
+    case large
+    case larger
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .small: return "Small"
+        case .regular: return "Default"
+        case .large: return "Large"
+        case .larger: return "Larger"
+        }
+    }
+
+    var scale: CGFloat {
+        switch self {
+        case .small: return 0.92
+        case .regular: return 1.0
+        case .large: return 1.15
+        case .larger: return 1.30
+        }
+    }
+
+    static func resolved(_ stored: String) -> AppTextSize {
+        AppTextSize(rawValue: stored) ?? .regular
+    }
+}
+
 /// Semantic sizes/weights plus SwiftUI/AppKit resolution for the selected face.
 enum Typography {
     enum Role {
@@ -75,17 +110,28 @@ enum Typography {
         case caption
         case caption2
 
-        var size: CGFloat {
+        /// Fixed point size before the user's Text Size scale is applied.
+        var baseSize: CGFloat {
             switch self {
             case .hero: return 36
             case .noteTitle: return 26
             case .title2: return 17
             case .title3: return 15
-            case .headline, .body: return 13
-            case .callout: return 12
-            case .subheadline: return 11
-            case .caption, .caption2: return 10
+            case .headline, .body: return 14
+            case .callout: return 13
+            case .subheadline: return 12
+            case .caption, .caption2: return 11
             }
+        }
+
+        /// `baseSize` scaled by the current Text Size setting, rounded to the
+        /// nearest 0.5pt. Not itself a live SwiftUI value — `.appFont`/
+        /// `.appFontScope` re-derive this on every observed settings change via
+        /// `AppFontModifier`; call sites that read `Role.size` directly (AppKit
+        /// code, one-shot `Font` construction) get the value current as of the
+        /// call, which is what `Theme.styleFingerprint` driven restyles rely on.
+        var size: CGFloat {
+            Typography.scaled(baseSize)
         }
 
         var weight: Font.Weight {
@@ -97,6 +143,16 @@ enum Typography {
         }
 
         var nsWeight: NSFont.Weight { Typography.nsWeight(weight) }
+    }
+
+    /// The current Text Size multiplier. AppKit call sites (`MarkdownStyler`,
+    /// `DiffEngine`) that build their own font scale off a literal base size
+    /// multiply by this directly instead of going through `Role`.
+    static var textScale: CGFloat { AppSettings.currentTextSize.scale }
+
+    /// `base` scaled by `textScale`, rounded to the nearest 0.5pt.
+    static func scaled(_ base: CGFloat) -> CGFloat {
+        ((base * textScale) * 2).rounded() / 2
     }
 
     static func nsWeight(_ weight: Font.Weight) -> NSFont.Weight {
@@ -236,22 +292,31 @@ enum Typography {
 }
 
 private struct AppFontModifier: ViewModifier {
-    let size: CGFloat
+    let baseSize: CGFloat
     let weight: Font.Weight
     let monospacedDigit: Bool
     let mono: Bool
     @AppStorage(AppSettings.fontFamilyKey) private var storedChoice = AppFontChoice.system.rawValue
+    @AppStorage(AppSettings.textSizeKey) private var storedTextSize = AppTextSize.regular.rawValue
 
     func body(content: Content) -> some View {
         content.font(resolvedFont)
     }
 
+    /// `baseSize` scaled by the live-observed text-size setting, so a change
+    /// to Settings ▸ Appearance ▸ Text Size re-renders every scoped surface
+    /// immediately — the same way `storedChoice` already makes face changes live.
+    private var resolvedSize: CGFloat {
+        let scale = AppTextSize.resolved(storedTextSize).scale
+        return ((baseSize * scale) * 2).rounded() / 2
+    }
+
     private var resolvedFont: Font {
         if mono {
-            return Typography.mono(size: size, weight: weight)
+            return Typography.mono(size: resolvedSize, weight: weight)
         }
         var font = Typography.font(
-            size: size,
+            size: resolvedSize,
             weight: weight,
             choice: AppFontChoice.resolved(storedChoice)
         )
@@ -269,7 +334,7 @@ extension View {
         monospacedDigit: Bool = false
     ) -> some View {
         modifier(AppFontModifier(
-            size: role.size,
+            baseSize: role.baseSize,
             weight: weight ?? role.weight,
             monospacedDigit: monospacedDigit,
             mono: false
@@ -278,7 +343,7 @@ extension View {
 
     func appFont(size: CGFloat, weight: Font.Weight = .regular) -> some View {
         modifier(AppFontModifier(
-            size: size,
+            baseSize: size,
             weight: weight,
             monospacedDigit: false,
             mono: false
@@ -287,7 +352,7 @@ extension View {
 
     func appMonoFont(_ role: Typography.Role, weight: Font.Weight? = nil) -> some View {
         modifier(AppFontModifier(
-            size: role.size,
+            baseSize: role.baseSize,
             weight: weight ?? role.weight,
             monospacedDigit: false,
             mono: true
@@ -296,24 +361,25 @@ extension View {
 
     func appMonoFont(size: CGFloat, weight: Font.Weight = .regular) -> some View {
         modifier(AppFontModifier(
-            size: size,
+            baseSize: size,
             weight: weight,
             monospacedDigit: false,
             mono: true
         ))
     }
 
-    /// Makes the user's chosen face the inherited default for this whole subtree.
-    /// Every descendant that does not set its own font — `Text`, `Button` and
-    /// `Toggle` labels, `TextField` content, `Link`, `Label` — renders in it, and
-    /// re-renders live when the setting changes.
+    /// Makes the user's chosen face — and current text size — the inherited
+    /// default for this whole subtree. Every descendant that does not set its
+    /// own font — `Text`, `Button` and `Toggle` labels, `TextField` content,
+    /// `Link`, `Label` — renders in it, and re-renders live when either setting
+    /// changes.
     ///
     /// Apply once at the root of each surface (window content, sheet, popover).
     /// AppKit-drawn surfaces (menus, alerts, popup/segmented pickers) do not
     /// inherit it — see the Typography section of docs/TECHNICAL_DESIGN.md.
     func appFontScope(_ role: Typography.Role = .body) -> some View {
         modifier(AppFontModifier(
-            size: role.size,
+            baseSize: role.baseSize,
             weight: role.weight,
             monospacedDigit: false,
             mono: false
@@ -333,11 +399,17 @@ public enum TypographySelfChecks {
             }
         }
 
-        // appFontScope swaps only the face, not the size, on the assumption that
-        // .body already matches SwiftUI's macOS default (~13pt) — the thing that
-        // makes the swap layout-neutral for every previously-unfonted control.
-        // If .body's size ever moves, that assumption breaks silently; catch it here.
-        expect(Typography.Role.body.size == 13, "Role.body must stay 13pt — appFontScope assumes it matches SwiftUI's macOS default")
+        // Pre-accessibility-pass, appFontScope's face swap was layout-neutral
+        // only because Role.body's size (13pt) happened to match SwiftUI's
+        // un-fonted macOS default — this file used to assert that coincidence
+        // directly. The type-scale bump below deliberately breaks it (body's
+        // base is now 14pt, and appFontScope always sets an explicit size), so
+        // verify the derived values instead of pinning the old number.
+        expect(Typography.Role.body.baseSize == 14, "Role.body's base size should be 14pt")
+        expect(
+            abs(Typography.Role.body.size - Typography.scaled(14)) < 0.01,
+            "Role.body.size should reflect the current text-size scale"
+        )
 
         expect(AppFontChoice.allCases.count == 10, "catalog should list 10 faces")
         expect(
@@ -352,6 +424,22 @@ public enum TypographySelfChecks {
         expect(AppFontChoice.resolved("not-a-font") == .system, "unknown stored value should default to System")
         expect(AppFontChoice.resolved(AppFontChoice.charter.rawValue) == .charter, "known raw value should round-trip")
 
+        expect(AppTextSize.allCases.count == 4, "text-size catalog should list 4 steps")
+        expect(
+            Set(AppTextSize.allCases.map(\.rawValue)).count == AppTextSize.allCases.count,
+            "text-size raw values should be unique"
+        )
+        expect(AppTextSize.resolved("") == .regular, "empty stored text size should default to Default")
+        expect(AppTextSize.resolved("gigantic") == .regular, "unknown stored text size should default to Default")
+        expect(AppTextSize.resolved(AppTextSize.larger.rawValue) == .larger, "known text-size raw value should round-trip")
+        expect(AppTextSize.regular.scale == 1.0, "Default text size should be a 1.0x scale")
+        expect(
+            AppTextSize.small.scale < AppTextSize.regular.scale
+                && AppTextSize.regular.scale < AppTextSize.large.scale
+                && AppTextSize.large.scale < AppTextSize.larger.scale,
+            "text-size steps should be strictly increasing"
+        )
+
         let defaults = UserDefaults.standard
         let saved = defaults.string(forKey: AppSettings.fontFamilyKey)
         defaults.removeObject(forKey: AppSettings.fontFamilyKey)
@@ -364,6 +452,21 @@ public enum TypographySelfChecks {
             defaults.set(saved, forKey: AppSettings.fontFamilyKey)
         } else {
             defaults.removeObject(forKey: AppSettings.fontFamilyKey)
+        }
+
+        let savedTextSize = defaults.string(forKey: AppSettings.textSizeKey)
+        defaults.removeObject(forKey: AppSettings.textSizeKey)
+        expect(AppSettings.currentTextSize == .regular, "unset text-size preference should be Default")
+        defaults.set(AppTextSize.large.rawValue, forKey: AppSettings.textSizeKey)
+        expect(AppSettings.currentTextSize == .large, "stored text-size preference should resolve")
+        expect(
+            Theme.styleFingerprint.contains(AppTextSize.large.rawValue),
+            "style fingerprint should include the current text-size choice"
+        )
+        if let savedTextSize {
+            defaults.set(savedTextSize, forKey: AppSettings.textSizeKey)
+        } else {
+            defaults.removeObject(forKey: AppSettings.textSizeKey)
         }
 
         let mono = Typography.nsMono(size: 12)

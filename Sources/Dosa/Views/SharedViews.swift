@@ -192,8 +192,15 @@ struct FloatingChrome<S: InsettableShape>: ViewModifier {
     }
 
     private func material(_ content: Content) -> some View {
-        content
-            .background(.regularMaterial, in: shape)
+        // Reduce Transparency: an opaque card fill instead of translucent
+        // material, both because that's what the setting asks for and because
+        // text contrast against `.regularMaterial` is unmeasurable — its
+        // backdrop is whatever happens to be behind the window.
+        let base = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            ? AnyShapeStyle(Theme.current.cardFillColor)
+            : AnyShapeStyle(.regularMaterial)
+        return content
+            .background(base, in: shape)
             .overlay(shape.strokeBorder(.quaternary))
             .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
     }
@@ -468,6 +475,8 @@ struct NotesStyleSlider: View {
                 EmptyView()
             }
             .labelsHidden()
+            .accessibilityLabel("Notes style")
+            .accessibilityValue(AppSettings.verbosityLevelNames[min(max(level, 0), 4)])
             .frame(maxWidth: .infinity)
             HStack {
                 Text("More Succinct")
@@ -477,7 +486,7 @@ struct NotesStyleSlider: View {
                 Text("More Detailed")
             }
             .appFont(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(Theme.secondaryTextColor)
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
@@ -508,7 +517,7 @@ struct RecordingAwayToast: View {
             }
             Text(TimeFormatting.clock(elapsed))
                 .appMonoFont(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
         }
         .appFont(.callout)
         .padding(.horizontal, 14)
@@ -537,7 +546,9 @@ private struct AnimatedEllipsis: View {
     var body: some View {
         HStack(spacing: 1) {
             ForEach(0..<3, id: \.self) { i in
-                Text(".").opacity(i < lit ? 1 : 0.15)
+                // 0.45, not 0.15 — the unlit floor still needs to read as
+                // present, not effectively invisible, against any background.
+                Text(".").opacity(i < lit ? 1 : 0.45) // contrast-ok: bounded floor, not a contrast regression
             }
         }
     }
@@ -558,6 +569,7 @@ struct RecordingWaveformView: View {
         }
         .frame(height: 20)
         .animation(.easeOut(duration: 0.12), value: levels)
+        .accessibilityHidden(true)
     }
 }
 
@@ -569,12 +581,13 @@ struct MultiSelectionView: View {
         VStack(spacing: 12) {
             Image(systemName: "square.stack.3d.up")
                 .font(.system(size: 44))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
+                .accessibilityHidden(true)
             Text("\(count) notes selected")
                 .appFont(.title2, weight: .semibold)
             Text("Right-click the selection in the sidebar to pin, move, or delete these notes together, or drag them into a folder.")
                 .appFont(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
         }
@@ -597,7 +610,8 @@ struct ErrorDialogView: View {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.title2)
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(Theme.current.warningTextColor)
+                    .accessibilityHidden(true)
                 Text("Something went wrong")
                     .appFont(.headline)
                 Spacer()
@@ -619,15 +633,20 @@ struct ErrorDialogView: View {
                     .frame(height: 150)
                     .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.3)))
                 } label: {
-                    Text(showDetails ? "Hide technical details" : "Show technical details")
-                        .appFont(.callout)
-                        .foregroundStyle(.secondary)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation {
-                                showDetails.toggle()
-                            }
+                    // A real Button, not a tap-gesture-only label, so this is
+                    // reachable by keyboard/VoiceOver as well as by mouse.
+                    Button {
+                        withAnimation {
+                            showDetails.toggle()
                         }
+                    } label: {
+                        Text(showDetails ? "Hide technical details" : "Show technical details")
+                            .appFont(.callout)
+                            .foregroundStyle(Theme.secondaryTextColor)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(.isButton)
                 }
             }
 
@@ -671,7 +690,7 @@ struct EditorPill<PillLabel: View>: View {
             if let info, isHovering {
                 Text(info)
                     .appFont(size: 12)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
                     .fixedSize()
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)

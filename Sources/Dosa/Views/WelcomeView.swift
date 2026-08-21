@@ -48,7 +48,7 @@ struct WelcomeView: View {
 
                     Text("Record meetings straight from your Mac's audio — Zoom, Meet, Teams, Huddles, anything — jot quick notes, and let Dosa turn them into polished meeting notes.")
                         .appFont(.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.secondaryTextColor)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 460)
                 }
@@ -62,7 +62,7 @@ struct WelcomeView: View {
 
                 Text("Click + at the top of the sidebar to create your first note.")
                     .appFont(.callout)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.tertiaryTextColor)
             }
             .padding(.horizontal, 24)
         }
@@ -100,10 +100,9 @@ private struct ShortcutHint: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
             Text(label)
                 .appFont(size: 13)
-                .foregroundStyle(.secondary)
-                // Headroom for the longest label ("Start Recording") at minimum width.
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .foregroundStyle(Theme.secondaryTextColor)
+                // Wraps rather than shrinking below a legible size at larger
+                // Text Size settings or the longest label ("Start Recording").
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -119,20 +118,25 @@ private struct StatCard: View {
             Image(systemName: icon)
                 .font(.title3)
                 .foregroundStyle(Theme.current.highlightColor)
+                .accessibilityHidden(true)
             Text(value)
                 .appFont(.title2, weight: .semibold, monospacedDigit: true)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .multilineTextAlignment(.center)
             Text(label)
                 .appFont(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 10)
-        .frame(width: 136, height: 104)
+        .padding(.vertical, 10)
+        // minHeight, not a fixed height: at larger Text Size settings the value
+        // or label can wrap, and the card should grow rather than clip.
+        .frame(minWidth: 136, maxWidth: 136, minHeight: 104)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Theme.current.cardFillColor)
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(value) \(label)")
     }
 }

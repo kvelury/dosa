@@ -52,7 +52,7 @@ struct CalendarEventDetailView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Meeting links")
                                 .appFont(.caption, weight: .semibold)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.secondaryTextColor)
                             ForEach(event.meetingLinks, id: \.absoluteString) { url in
                                 Button(url.absoluteString) {
                                     NSWorkspace.shared.open(url)
@@ -114,7 +114,7 @@ struct CalendarEventDetailView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .appFont(.caption, weight: .semibold)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
             Text(value)
                 .textSelection(.enabled)
         }

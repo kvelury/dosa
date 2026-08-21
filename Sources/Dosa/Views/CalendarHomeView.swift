@@ -26,7 +26,7 @@ struct CalendarHomeView: View {
                         .multilineTextAlignment(.center)
                     Text(WelcomeGreeting.todayText)
                         .appFont(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.secondaryTextColor)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
@@ -48,7 +48,7 @@ struct CalendarHomeView: View {
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text(group.title)
                                         .appFont(.headline)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Theme.secondaryTextColor)
                                     ForEach(group.events) { event in
                                         Button {
                                             selectedEvent = event
@@ -89,11 +89,11 @@ struct CalendarHomeView: View {
                     .controlSize(.small)
                 Text("Loading upcoming meetings…")
                     .appFont(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
             } else if let error = calendar.errorMessage {
                 Text(error)
                     .appFont(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
                     .multilineTextAlignment(.center)
                 Button("Try Again") {
                     Task { await calendar.refresh() }
@@ -101,7 +101,7 @@ struct CalendarHomeView: View {
             } else {
                 Text("No upcoming meetings in the next 30 days.")
                     .appFont(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryTextColor)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -113,7 +113,7 @@ struct CalendarHomeView: View {
                 .foregroundStyle(Theme.current.highlightColor)
             Text(message)
                 .appFont(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
             Spacer()
             if retry {
                 if calendar.isRefreshing {
@@ -194,12 +194,12 @@ struct CalendarEventCard: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Theme.current.accentColor.opacity(0.18)))
-                        .foregroundStyle(Theme.current.accentColor)
+                        .foregroundStyle(Theme.current.accentTextColor)
                 }
             }
             Text(timeRange)
                 .appFont(.subheadline, monospacedDigit: true)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
             HStack(spacing: 10) {
                 Label(event.calendarName, systemImage: "calendar")
                     .appFont(.caption)
@@ -210,13 +210,15 @@ struct CalendarEventCard: View {
                 if event.location != nil {
                     Image(systemName: "mappin.and.ellipse")
                         .font(.caption)
+                        .accessibilityLabel("Has location")
                 }
                 if !event.meetingLinks.isEmpty {
                     Image(systemName: "video")
                         .font(.caption)
+                        .accessibilityLabel("Has video link")
                 }
             }
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(Theme.tertiaryTextColor)
             .lineLimit(1)
         }
         .padding(14)
@@ -230,6 +232,7 @@ struct CalendarEventCard: View {
                 .strokeBorder(.quaternary)
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .combine)
     }
 
     private var timeRange: String {

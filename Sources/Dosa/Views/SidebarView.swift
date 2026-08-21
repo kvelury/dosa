@@ -22,14 +22,20 @@ struct SidebarView: View {
                     promptNewFolder(nil)
                 } label: {
                     Image(systemName: "folder.badge.plus")
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .help("New folder")
+                .accessibilityLabel("New folder")
                 Button {
                     appState.showGlobalSearch = true
                 } label: {
                     Image(systemName: "magnifyingglass")
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .help("Search all notes and transcripts (⌘K)")
+                .accessibilityLabel("Search all notes and transcripts")
                 Spacer()
                 // Split into a button and a menu because a Menu's own control
                 // metrics win over its label's font, and its built-in indicator
@@ -43,8 +49,11 @@ struct SidebarView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 15, height: 15)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .help("New note (⌘N)")
+                    .accessibilityLabel("New note")
                     Menu {
                         Button("New Note") {
                             let note = store.createNote()
@@ -70,16 +79,19 @@ struct SidebarView: View {
                             .scaledToFit()
                             .frame(width: 8, height: 8)
                             .fontWeight(.regular)
+                            .frame(width: 20, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .help("New note from a template, or import audio")
+                    .accessibilityLabel("New note from template, or import audio")
                 }
             }
             .buttonStyle(.borderless)
             .font(.system(size: 16, weight: .medium)) // system-font: sizes the SF Symbols in this toolbar row
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Theme.secondaryTextColor)
             .padding(.horizontal, 14)
             .padding(.top, 34)
             // Enough of a gap that the "Notes" section header reads as the top of
@@ -115,13 +127,16 @@ struct SidebarView: View {
                             Image(systemName: "arrow.down.circle.fill")
                                 .font(.caption2)
                                 .foregroundStyle(Theme.current.accentColor)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .help("An update is available — open Settings to install it")
+                        .accessibilityLabel("Update available — open Settings to install")
                     }
                     Text("v\(BuildInfo.shortVersion)")
                         .appFont(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.tertiaryTextColor)
                 }
             }
             .padding(.horizontal, 14)
@@ -208,7 +223,7 @@ struct SidebarView: View {
                 if store.activeNotes.isEmpty && store.folders.isEmpty {
                     Text("No notes yet — click +")
                         .appFont(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.secondaryTextColor)
                 }
             } header: {
                 RootDropHeader()
@@ -222,29 +237,35 @@ struct SidebarView: View {
                     if store.deletedNotes.isEmpty {
                         Text("Empty")
                             .appFont(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.secondaryTextColor)
                     } else {
                         Button {
                             confirmEmptyTrash = true
                         } label: {
                             Label("Empty Deleted Notes…", systemImage: "trash.slash")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(Theme.current.dangerTextColor)
                         }
                         .buttonStyle(.plain)
                     }
                 } label: {
-                    Label("Deleted Notes", systemImage: "trash")
-                        .appFont(size: 14)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            deletedNotesExpanded.toggle()
-                        }
+                    // A real Button, not a tap-gesture-only label, so the
+                    // disclosure is reachable by keyboard/VoiceOver (Space to
+                    // toggle) as well as by mouse.
+                    Button {
+                        deletedNotesExpanded.toggle()
+                    } label: {
+                        Label("Deleted Notes", systemImage: "trash")
+                            .appFont(size: 14)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(.isButton)
                 }
             } footer: {
                 if !store.deletedNotes.isEmpty {
                     Text("Deleted notes are removed permanently after \(NotesStore.trashRetentionDays) days.")
                         .appFont(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.tertiaryTextColor)
                 }
             }
         }
@@ -283,7 +304,7 @@ private struct RootDropHeader: View {
             Text("Notes")
             if isDropTargeted {
                 Text("— drop to move out of folder")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.current.accentTextColor)
             }
             Spacer()
         }
@@ -341,22 +362,27 @@ private struct FolderRow: View {
                 )
             }
         } label: {
-            Label(folder.name, systemImage: "folder")
-                .appFont(size: 14)
-                .padding(.vertical, 2)
-                .padding(.horizontal, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(isDropTargeted ? Color.accentColor.opacity(0.25) : Color.clear)
-                )
-                .onDrop(of: [.plainText], isTargeted: $isDropTargeted) { providers in
-                    handleDrop(providers)
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    isExpanded.toggle()
-                }
-                .contextMenu {
+            // A real Button, not a tap-gesture-only label, so the disclosure is
+            // reachable by keyboard/VoiceOver as well as by mouse.
+            Button {
+                isExpanded.toggle()
+            } label: {
+                Label(folder.name, systemImage: "folder")
+                    .appFont(size: 14)
+                    .padding(.vertical, 2)
+                    .padding(.horizontal, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(isDropTargeted ? Color.accentColor.opacity(0.25) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isButton)
+            .onDrop(of: [.plainText], isTargeted: $isDropTargeted) { providers in
+                handleDrop(providers)
+            }
+            .contextMenu {
                     Button("New Note in \"\(folder.name)\"") {
                         let note = store.createNote(in: folder.id)
                         selectedNoteIds = [note.id]
@@ -409,6 +435,14 @@ private struct NoteRow: View {
         targetIds.allSatisfy { store.note(id: $0)?.isPinned == true }
     }
 
+    private var statusSummary: String {
+        var parts: [String] = []
+        if note.recordingFileName != nil { parts.append("has recording") }
+        if note.enhancedMarkdown != nil { parts.append("has Dosa notes") }
+        if generator.activeNoteId == note.id && generator.phase != .idle { parts.append("processing") }
+        return parts.isEmpty ? "" : ", " + parts.joined(separator: ", ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(note.displayTitle)
@@ -419,21 +453,24 @@ private struct NoteRow: View {
                     .appFont(size: 12)
                 if note.recordingFileName != nil {
                     Image(systemName: "waveform")
-                        .font(.system(size: 10))
+                        .font(.system(size: 12))
                 }
                 if note.enhancedMarkdown != nil {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 10))
+                        .font(.system(size: 12))
                 }
                 if generator.activeNoteId == note.id && generator.phase != .idle {
                     ProgressView()
                         .controlSize(.mini)
                 }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Theme.secondaryTextColor)
+            .accessibilityHidden(true)
         }
         .padding(.vertical, 1)
         .tag(note.id)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(note.displayTitle), \(note.createdAt.formatted(date: .abbreviated, time: .omitted))\(statusSummary)")
         .itemProvider {
             NSItemProvider(object: targetIds.map(\.uuidString).joined(separator: ",") as NSString)
         }
@@ -497,13 +534,15 @@ private struct DeletedNoteRow: View {
             Text(note.displayTitle)
                 .appFont(size: 14)
                 .lineLimit(1)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryTextColor)
             Text("\(store.daysRemaining(for: note)) days left")
                 .appFont(size: 12)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.tertiaryTextColor)
         }
         .padding(.vertical, 1)
         .tag(note.id)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(note.displayTitle), \(store.daysRemaining(for: note)) days left")
         .contextMenu {
             Button("Restore") {
                 store.restore(note.id)

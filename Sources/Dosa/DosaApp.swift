@@ -153,6 +153,7 @@ public struct DosaApp: App {
                 recording: recorder.isRecording,
                 phase: recorder.ringPhase
             ))
+            .accessibilityLabel(recorder.isRecording ? "Dosa, recording" : "Dosa")
         }
         .menuBarExtraStyle(.menu)
     }
