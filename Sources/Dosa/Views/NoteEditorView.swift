@@ -12,6 +12,7 @@ struct NoteEditorView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var notion: NotionManager
     @EnvironmentObject private var notifier: NotificationManager
+    @EnvironmentObject private var calendar: GoogleCalendarManager
 
     let noteId: UUID
     @Binding var selectedNoteId: UUID?
@@ -40,6 +41,8 @@ struct NoteEditorView: View {
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
     @State private var editorHighlight: TextHighlight?
     @State private var transcriptHighlight: TextHighlight?
+    @State private var showDatePicker = false
+    @State private var showMeeting = false
 
     private var isImporting: Bool {
         appState.importingNoteIds.contains(noteId)
@@ -154,14 +157,30 @@ struct NoteEditorView: View {
             TextField("Untitled Note", text: note.title)
                 .textFieldStyle(.plain)
                 .font(.system(size: 26, weight: .bold))
-            HStack(spacing: 14) {
-                DatePicker("", selection: note.createdAt, displayedComponents: .date)
-                    .labelsHidden()
-                    .datePickerStyle(.compact)
+            HStack(spacing: 8) {
+                EditorPill(action: { showDatePicker = true }) {
+                    Text(current.createdAt.formatted(date: .long, time: .omitted))
+                }
+                .popover(isPresented: $showDatePicker) {
+                    DatePicker("", selection: note.createdAt, displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .labelsHidden()
+                        .padding(12)
+                        .frame(width: 260)
+                }
+                if let event = meeting(for: current) {
+                    EditorPill(action: { showMeeting = true }) {
+                        Image(systemName: "calendar")
+                    }
+                    .help(event.displayTitle)
+                    .popover(isPresented: $showMeeting) {
+                        CalendarEventDetailView(event: event, style: .compact)
+                    }
+                }
                 if let duration = current.recordingDuration {
-                    Label(TimeFormatting.clock(duration), systemImage: "waveform")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
+                    EditorPill {
+                        Label(TimeFormatting.clock(duration), systemImage: "waveform")
+                    }
                 }
                 Spacer()
                 if current.enhancedMarkdown != nil {
@@ -179,6 +198,19 @@ struct NoteEditorView: View {
         .padding(.horizontal, 20)
         .padding(.top, 16)
         .padding(.bottom, 10)
+    }
+
+    /// Resolves the meeting a note is linked to: the live calendar first, so an
+    /// event still inside the sync window always shows current data, falling
+    /// back to the stored snapshot and finally a minimal placeholder for notes
+    /// created before snapshots existed.
+    private func meeting(for note: Note) -> CalendarEvent? {
+        guard let uid = note.calendarEventUID,
+              let start = note.calendarEventInstanceStart else { return nil }
+        let identity = CalendarEventIdentity(iCalUID: uid, instanceStart: start)
+        return calendar.events.first { $0.identity == identity }
+            ?? note.calendarEventSnapshot
+            ?? .placeholder(for: note)
     }
 
     @ViewBuilder

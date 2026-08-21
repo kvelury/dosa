@@ -130,6 +130,9 @@ struct ContentView: View {
             guard store.note(id: id) != nil else { return }
             appState.selectedNoteIds = [id]
         }
+        .onChange(of: calendar.events) { _, events in
+            store.refreshCalendarSnapshots(from: events)
+        }
         .onAppear {
             AppSettings.applyAppearance()
             calendar.start()

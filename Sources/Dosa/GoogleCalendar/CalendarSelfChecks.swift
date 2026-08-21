@@ -185,6 +185,66 @@ public enum CalendarSelfChecks {
         expect(store.note(id: first.id)?.calendarEventUID == nil, "restored note stays unlinked")
         expect(store.activeNote(for: meeting.identity)?.id == replacement.id, "restore does not steal the active link")
 
+        // Calendar event snapshots on notes: round-trip, back-compat decode,
+        // placeholder fallback, and live-refresh.
+        do {
+            var withSnapshot = Note(title: "Snapshot round-trip")
+            withSnapshot.calendarEventUID = "snap@google.com"
+            withSnapshot.calendarEventInstanceStart = Date(timeIntervalSince1970: 1_787_259_600)
+            withSnapshot.calendarEventSnapshot = event(title: "Interview with XYZ")
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            do {
+                let data = try encoder.encode(withSnapshot)
+                let decoded = try decoder.decode(Note.self, from: data)
+                expect(decoded.calendarEventSnapshot?.displayTitle == "Interview with XYZ", "snapshot survives a round-trip")
+            } catch {
+                expect(false, "snapshot round-trip failed: \(error)")
+            }
+
+            // JSON written before this field existed — a real Note payload with
+            // "calendarEventSnapshot" stripped out — should still decode, with
+            // the field nil.
+            do {
+                var legacyNote = Note(title: "Pre-snapshot note")
+                legacyNote.calendarEventUID = "legacy@google.com"
+                let data = try encoder.encode(legacyNote)
+                guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    throw CocoaError(.coderInvalidValue)
+                }
+                object.removeValue(forKey: "calendarEventSnapshot")
+                let legacy = try JSONSerialization.data(withJSONObject: object)
+                let decoded = try decoder.decode(Note.self, from: legacy)
+                expect(decoded.title == "Pre-snapshot note", "legacy note title decodes")
+                expect(decoded.calendarEventUID == "legacy@google.com", "legacy note's other fields decode")
+                expect(decoded.calendarEventSnapshot == nil, "legacy note decodes with a nil snapshot")
+            } catch {
+                expect(false, "legacy note decode failed: \(error)")
+            }
+        }
+
+        expect(CalendarEvent.placeholder(for: Note(title: "No link")) == nil, "placeholder is nil without a calendar link")
+        do {
+            var linked = Note(title: "Standalone")
+            linked.calendarEventUID = "placeholder@google.com"
+            linked.calendarEventInstanceStart = Date(timeIntervalSince1970: 1_787_259_600)
+            linked.calendarHTMLLink = "https://calendar.google.com/event?eid=xyz"
+            let placeholder = CalendarEvent.placeholder(for: linked)
+            expect(placeholder?.title == "Standalone", "placeholder title comes from the note")
+            expect(placeholder?.googleCalendarURL?.absoluteString == "https://calendar.google.com/event?eid=xyz", "placeholder carries the Google Calendar link")
+        }
+
+        do {
+            let renamed = event(identity: meeting.identity, calendarID: meeting.calendarID, title: "Interview (rescheduled)")
+            store.refreshCalendarSnapshots(from: [renamed])
+            expect(store.note(id: replacement.id)?.calendarEventSnapshot?.displayTitle == "Interview (rescheduled)", "live refresh updates a matching note's snapshot")
+            let unrelated = store.createNote(title: "Not linked to anything")
+            store.refreshCalendarSnapshots(from: [renamed])
+            expect(store.note(id: unrelated.id)?.calendarEventSnapshot == nil, "refresh leaves unrelated notes untouched")
+        }
+
         // OAuth client JSON. The shape Google actually hands you is nested under
         // "installed"; a flat object with the same fields is also accepted.
         func parsed(_ json: String, _ message: String) -> GoogleCalendarAuth.Credentials? {

@@ -2,14 +2,20 @@ import SwiftUI
 import AppKit
 
 struct CalendarEventDetailView: View {
+    enum Style {
+        case sheet
+        case compact
+    }
+
     @Environment(\.dismiss) private var dismiss
 
     let event: CalendarEvent
-    let existingNote: Note?
-    let isRecording: Bool
-    let onCreateNote: () -> Void
-    let onCreateAndRecord: () -> Void
-    let onOpenNote: (Note) -> Void
+    var style: Style = .sheet
+    var existingNote: Note? = nil
+    var isRecording: Bool = false
+    var onCreateNote: (() -> Void)? = nil
+    var onCreateAndRecord: (() -> Void)? = nil
+    var onOpenNote: ((Note) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -18,8 +24,10 @@ struct CalendarEventDetailView: View {
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.leading)
                 Spacer()
-                Button("Close") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+                if style == .sheet {
+                    Button("Close") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                }
             }
             .padding()
 
@@ -28,7 +36,9 @@ struct CalendarEventDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     labeled("When", timeSummary)
-                    labeled("Calendar", event.calendarName)
+                    if !event.calendarName.isEmpty {
+                        labeled("Calendar", event.calendarName)
+                    }
                     if !event.otherAttendees.isEmpty {
                         labeled("Attendees", event.otherAttendees.map(\.label).joined(separator: ", "))
                     }
@@ -60,37 +70,40 @@ struct CalendarEventDetailView: View {
                 .padding()
             }
 
-            Divider()
+            if style == .sheet {
+                Divider()
 
-            HStack {
-                Spacer()
-                if let existingNote {
-                    Button("Open Note") {
-                        onOpenNote(existingNote)
+                HStack {
+                    Spacer()
+                    if let existingNote {
+                        Button("Open Note") {
+                            onOpenNote?(existingNote)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.current.accentColor)
+                    } else {
+                        Button("Create Note") {
+                            onCreateNote?()
+                        }
+                        Button("Create & Start Recording Note") {
+                            onCreateAndRecord?()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.current.accentColor)
+                        .disabled(isRecording)
+                        .help(isRecording ? "Stop the current recording before starting another." : "Create a note for this meeting and start recording.")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.current.accentColor)
-                } else {
-                    Button("Create Note") {
-                        onCreateNote()
-                    }
-                    Button("Create & Start Recording Note") {
-                        onCreateAndRecord()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.current.accentColor)
-                    .disabled(isRecording)
-                    .help(isRecording ? "Stop the current recording before starting another." : "Create a note for this meeting and start recording.")
                 }
+                .padding()
             }
-            .padding()
         }
-        .frame(minWidth: 460, minHeight: 420)
+        .modifier(SizingModifier(style: style))
         .background(Theme.current.editorBackgroundColor)
     }
 
     private var timeSummary: String {
         let date = event.start.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+        guard event.start != event.end else { return date }
         let start = event.start.formatted(date: .omitted, time: .shortened)
         let end = event.end.formatted(date: .omitted, time: .shortened)
         return "\(date) · \(start) – \(end)"
@@ -103,6 +116,19 @@ struct CalendarEventDetailView: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .textSelection(.enabled)
+        }
+    }
+}
+
+private struct SizingModifier: ViewModifier {
+    let style: CalendarEventDetailView.Style
+
+    func body(content: Content) -> some View {
+        switch style {
+        case .sheet:
+            content.frame(minWidth: 460, minHeight: 420)
+        case .compact:
+            content.frame(width: 380).frame(maxHeight: 360)
         }
     }
 }

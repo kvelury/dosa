@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Shown at the top of every detail-pane page until the user has a name and
 /// an LLM API key configured — both are required before recording/notes are
@@ -637,5 +638,43 @@ struct ErrorDialogView: View {
         }
         .padding(20)
         .frame(width: 460)
+    }
+}
+
+/// A themed capsule chip matching the homepage meeting cards' fill and hairline
+/// border. Pass `action` to make it clickable with a hover cue; omit it for a
+/// static chip like the recording-duration indicator.
+struct EditorPill<PillLabel: View>: View {
+    var action: (() -> Void)?
+    @ViewBuilder var label: PillLabel
+
+    @State private var isHovering = false
+
+    var body: some View {
+        if let action {
+            Button(action: action) { content }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    isHovering = hovering
+                    if hovering {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
+        label
+            .font(.system(size: 13))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Theme.current.cardFillColor))
+            .overlay(Capsule().strokeBorder(.quaternary))
+            .overlay(Capsule().fill(Theme.current.accentColor.opacity(isHovering ? 0.10 : 0)))
+            .contentShape(Capsule())
     }
 }
