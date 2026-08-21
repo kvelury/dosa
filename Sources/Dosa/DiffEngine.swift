@@ -94,7 +94,7 @@ enum DiffEngine {
             var piece = AttributedString((lastWasNewline ? "" : " ") + token)
             piece.foregroundColor = insertedOffsets.contains(offset) ? aiColor : .primary
             if let level = headingLevel {
-                piece.font = .system(size: headingFontSize(level: level), weight: .bold)
+            piece.font = Typography.font(size: headingFontSize(level: level), weight: .bold)
             }
             result += piece
             lastWasNewline = false

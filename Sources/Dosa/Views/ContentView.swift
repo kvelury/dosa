@@ -73,7 +73,7 @@ struct ContentView: View {
                     }
                     if let toast = notifier.toast {
                         Text(toast)
-                            .font(.callout)
+                            .appFont(.callout)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
                             .floatingChrome(in: Capsule())

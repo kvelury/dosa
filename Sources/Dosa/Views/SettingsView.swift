@@ -15,6 +15,7 @@ private struct SettingsSnapshot: Codable {
     var notesVerbosity: Int?
     var theme: String?
     var accentOverride: String?
+    var fontFamily: String?
     var dosaNotesColor: String?
     var notesPrompt: String?
     var transcriptPrompt: String?
@@ -40,6 +41,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.dosaColorKey) private var dosaColor = "Theme Default"
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
+    @AppStorage(AppSettings.fontFamilyKey) private var fontFamily = AppFontChoice.system.rawValue
     @AppStorage(AppSettings.notificationsEnabledKey) private var notificationsEnabled = true
     @AppStorage(AppSettings.automaticModeKey) private var automaticMode = false
     @AppStorage(AppSettings.automaticUpdateCheckKey) private var automaticUpdateCheck = true
@@ -129,13 +131,13 @@ struct SettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Connect your own Notion account (opens the browser). Dosa creates a private “Dosa Notes” database in your workspace and exports notes there via Export to Notion in a note's ⋯ menu.")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if let notionError = notion.errorMessage {
                     Text(notionError)
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -152,7 +154,7 @@ struct SettingsView: View {
             case .unavailable:
                 VStack(alignment: .leading, spacing: 8) {
                     Text("No Google OAuth client is configured. Create a Desktop client in the Google Cloud Console, then add the JSON it gives you.")
-                        .font(.callout)
+                        .appFont(.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -207,7 +209,7 @@ struct SettingsView: View {
                                 Text(item.name)
                                 if item.isPrimary {
                                     Text("Primary")
-                                        .font(.caption)
+                                        .appFont(.caption)
                                         .foregroundStyle(.tertiary)
                                 }
                             }
@@ -240,23 +242,23 @@ struct SettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Connect your Google account in the browser. Dosa reads the next 30 days of meetings from the calendars you select and shows them on the home screen. At least one calendar must stay selected.")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if let clientID = calendar.activeClientID {
                     HStack(spacing: 6) {
                         Text("OAuth client \(clientID.prefix(12))…")
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundStyle(.tertiary)
                         Button("Remove") { calendar.clearCredentials() }
                             .buttonStyle(.link)
-                            .font(.caption)
+                            .appFont(.caption)
                     }
                 }
                 if let calendarError = calendar.errorMessage {
                     Text(calendarError)
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -331,7 +333,7 @@ struct SettingsView: View {
                     }
                     Label("Because Dosa is signed ad-hoc, macOS treats each new build as a different app. After the restart you'll be asked again for Microphone and Screen & System Audio Recording, and notifications may need re-approving.",
                           systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.orange)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -349,7 +351,7 @@ struct SettingsView: View {
 
             if let statusNote = updater.statusNote {
                 Text(statusNote)
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -358,26 +360,26 @@ struct SettingsView: View {
 
             Toggle("Check for updates when Dosa starts", isOn: $automaticUpdateCheck)
             Link("View releases on GitHub →", destination: UpdateManager.releasesPageURL)
-                .font(.caption)
+                .appFont(.caption)
         } header: {
             Text("Updates")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Updates are built from the latest commit on main and downloaded from GitHub Releases. Because Dosa is signed ad-hoc rather than with a Developer ID certificate, macOS treats each update as a new app — you'll be asked again for Microphone and Screen & System Audio Recording permission after installing.")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                 if let error = updater.errorMessage {
                     Text(error)
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let previous = updater.previousFailure {
                     Text(previous)
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -410,7 +412,7 @@ struct SettingsView: View {
         }
         ForEach(Array(update.subjects.enumerated()), id: \.offset) { _, subject in
             Text(subject)
-                .font(.caption)
+                .appFont(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -418,7 +420,7 @@ struct SettingsView: View {
         }
         if let compareURL = update.compareURL {
             Link("View all changes on GitHub →", destination: compareURL)
-                .font(.caption)
+                .appFont(.caption)
         }
     }
 
@@ -433,7 +435,7 @@ struct SettingsView: View {
     private var notWritableCopy: some View {
         (Text("Dosa can't update itself here. ").fontWeight(.semibold)
          + Text("\(Bundle.main.bundleURL.deletingLastPathComponent().path) can only be changed by an administrator on this Mac. Download the update and replace \(Bundle.main.bundleURL.path) yourself, or ask an admin."))
-            .font(.caption)
+            .appFont(.caption)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -497,22 +499,22 @@ struct SettingsView: View {
                 DisclosureGroup(isExpanded: templateExpanded(template.id)) {
                     TextField("Name", text: $template.name)
                     Text("Sections prefilled into a new note")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     TextEditor(text: $template.body)
-                        .font(.system(size: 11, design: .monospaced))
+                        .appMonoFont(size: 11)
                         .frame(height: 140)
                     Text("What the AI is told about this note type")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     TextEditor(text: $template.promptContext)
-                        .font(.system(size: 11, design: .monospaced))
+                        .appMonoFont(size: 11)
                         .frame(height: 120)
                     HStack {
                         if template.builtInKey != nil {
@@ -543,7 +545,7 @@ struct SettingsView: View {
             Text("Note Templates")
         } footer: {
             Text("Templates appear under Templates in the ＋ menu in the sidebar. Choosing one prefills the note with its sections and tells the AI what kind of conversation it is, so the generated notes match. {{user_name}} works inside a template's AI context. Any template can be deleted, built-in ones included — Restore Defaults brings the four shipped templates back. A template only sets structure and context: generated notes stay a factual record either way, and never score or pass judgement on a conversation.")
-                .font(.caption)
+                .appFont(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -555,7 +557,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func textOnlyProviderNote(_ name: String) -> some View {
         Text("\(name) generates your notes but can't transcribe audio — recordings use the engine picked in the Transcription section above. A Gemini key is only needed if that engine is Gemini (Cloud).")
-            .font(.caption)
+            .appFont(.caption)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -593,7 +595,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             HStack {
                 Label("Dosa Settings", systemImage: "gearshape")
-                    .font(.headline)
+                    .appFont(.headline)
                 Spacer()
                 Button("Done") {
                     dismiss()
@@ -611,7 +613,7 @@ struct SettingsView: View {
                     Text("Profile")
                 } footer: {
                     Text("Told to the AI so it labels your voice with the right name in transcripts and notes.")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -628,7 +630,7 @@ struct SettingsView: View {
                        apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Label("Gemini (Cloud) transcription needs a Gemini API key — add one in the LLM Provider section below.",
                               systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundStyle(.orange)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -640,7 +642,7 @@ struct SettingsView: View {
                               ? "On-Device (Advanced) isn't in this build. This Mac is on macOS 26, but Dosa was compiled without the macOS 26 SDK — install Xcode 26 and rebuild. Until then this Mac will use On-Device (Basic)."
                               : "On-Device (Advanced) needs macOS 26 or later — this Mac will use On-Device (Basic) instead.",
                               systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundStyle(.orange)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -650,7 +652,7 @@ struct SettingsView: View {
                     Text("Transcription")
                 } footer: {
                     Text(transcriptionEngineBlurb)
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -660,7 +662,7 @@ struct SettingsView: View {
                 Section("LLM Provider") {
                     if configuredProviders.isEmpty {
                         Text("Add an API key below — the provider you configure becomes the default.")
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -688,14 +690,14 @@ struct SettingsView: View {
                         SecureField("API Key", text: $apiKey)
                         Link("Get a free API key at ai.google.dev →",
                              destination: URL(string: "https://ai.google.dev/gemini-api/docs/api-key")!)
-                            .font(.caption)
+                            .appFont(.caption)
                         Picker("Model", selection: $model) {
                             ForEach(AppSettings.availableModels(for: "Gemini"), id: \.self) { name in
                                 Text(name)
                             }
                         }
                         Text("Applies to note generation. Transcription always uses \(AppSettings.transcriptionModel) — the cheapest tier that handles audio.")
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -704,7 +706,7 @@ struct SettingsView: View {
                         SecureField("API Key", text: $anthropicAPIKey)
                         Link("Get an API key at platform.claude.com →",
                              destination: URL(string: "https://platform.claude.com/settings/keys")!)
-                            .font(.caption)
+                            .appFont(.caption)
                         Picker("Model", selection: $anthropicModel) {
                             ForEach(AppSettings.availableModels(for: "Anthropic"), id: \.self) { name in
                                 Text(name)
@@ -715,7 +717,7 @@ struct SettingsView: View {
                         SecureField("API Key", text: $deepseekAPIKey)
                         Link("Get an API key at platform.deepseek.com →",
                              destination: URL(string: "https://platform.deepseek.com/api_keys")!)
-                            .font(.caption)
+                            .appFont(.caption)
                         Picker("Model", selection: $deepseekModel) {
                             ForEach(AppSettings.availableModels(for: "DeepSeek"), id: \.self) { name in
                                 Text(name)
@@ -724,7 +726,7 @@ struct SettingsView: View {
                         textOnlyProviderNote("DeepSeek")
                     } else {
                         Text("\(selectedTab) support is coming soon.")
-                            .font(.callout)
+                            .appFont(.callout)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -739,7 +741,7 @@ struct SettingsView: View {
                     Text("Automatic Mode")
                 } footer: {
                     Text("As soon as you stop a recording, Dosa transcribes it and generates notes — no need to press Generate Notes. Because this can finish while you're in another note or another app, Dosa tells you when the notes are ready with an in-app message or a notification.")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -759,7 +761,7 @@ struct SettingsView: View {
                     Text("Notes Style: \(AppSettings.verbosityLevelNames[min(max(verbosity, 0), 4)])")
                 } footer: {
                     Text("Controls how succinct or detailed generated notes are. Fills the {{verbosity}} placeholder in the prompt below.")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -771,11 +773,11 @@ struct SettingsView: View {
                 Section {
                     DisclosureGroup(isExpanded: $notesPromptExpanded) {
                         TextEditor(text: $notesPrompt)
-                            .font(.system(size: 11, design: .monospaced))
+                            .appMonoFont(size: 11)
                             .frame(height: 180)
                         HStack {
                             Text("Placeholders: {{title}}, {{date}}, {{user_name}}, {{verbosity}}, {{template_context}}, {{manual_notes}}, {{transcript}}")
-                                .font(.caption)
+                                .appFont(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Button("Reset to Default") {
@@ -784,7 +786,7 @@ struct SettingsView: View {
                         }
                         if !notesPrompt.contains("{{template_context}}") {
                             Text("Your customized prompt doesn't include `{{template_context}}` — template guidance will be added at the top of the prompt instead. Reset to Default to place it inline.")
-                                .font(.caption)
+                                .appFont(.caption)
                                 .foregroundStyle(.tertiary)
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -795,7 +797,7 @@ struct SettingsView: View {
                     }
                 } footer: {
                     Text("Your manual notes are always kept (with spelling and grammar corrected) in the primary text color; Dosa's additions render in grey.")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -805,7 +807,7 @@ struct SettingsView: View {
                 Section {
                     DisclosureGroup(isExpanded: $transcriptPromptExpanded) {
                         TextEditor(text: $transcriptPrompt)
-                            .font(.system(size: 11, design: .monospaced))
+                            .appMonoFont(size: 11)
                             .frame(height: 130)
                         HStack {
                             Spacer()
@@ -830,13 +832,13 @@ struct SettingsView: View {
                                     "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
                             }
                         }
-                        .font(.caption)
+                        .appFont(.caption)
                     }
                 } header: {
                     Text("Notifications")
                 } footer: {
                     Text("Dosa tells you when a recording is saved and when generated notes are ready. macOS banners only appear when Dosa isn't the active app — while you're in Dosa you'll get an in-app message instead.")
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -856,6 +858,7 @@ struct SettingsView: View {
                     }
                     HStack(spacing: 10) {
                         Text("Accent Override")
+                            .appFont(.body)
                         Spacer()
                         ForEach(Theme.accentOverrideOptions, id: \.self) { name in
                             accentSwatch(name)
@@ -863,6 +866,7 @@ struct SettingsView: View {
                     }
                     HStack(spacing: 10) {
                         Text("Dosa Notes Color")
+                            .appFont(.body)
                         Spacer()
                         ForEach(["Theme Default"] + AppSettings.dosaColorOptions, id: \.self) { name in
                             colorSwatch(name)
@@ -876,11 +880,22 @@ struct SettingsView: View {
                     .onChange(of: appearance) { _, _ in
                         AppSettings.applyAppearance()
                     }
+                    Picker("Font", selection: $fontFamily) {
+                        ForEach(AppFontChoice.allCases) { choice in
+                            Text(choice.displayName)
+                                .font(Typography.font(.body, choice: choice))
+                                .tag(choice.rawValue)
+                        }
+                    }
+                    Text("The quick brown fox jumps over the lazy dog.")
+                        .appFont(.body)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } header: {
                     Text("Theme")
                 } footer: {
-                    Text("Each theme is a matched palette for buttons, icons, backgrounds, and highlights. The accent and Dosa-notes overrides recolor on top of any theme.")
-                        .font(.caption)
+                    Text("Each theme is a matched palette for buttons, icons, backgrounds, and highlights. The accent, Dosa-notes, and font choices apply on top of any theme. Code, timers, and API keys stay monospaced.")
+                        .appFont(.caption)
                         .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -906,13 +921,13 @@ struct SettingsView: View {
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Exports your settings as a JSON file you can import into Dosa on another machine. API keys, Notion credentials, and Google Calendar tokens are not included — reconnect those separately on the other machine.")
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                         if let backupStatus {
                             Text(backupStatus)
-                                .font(.caption)
+                                .appFont(.caption)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -948,12 +963,12 @@ struct SettingsView: View {
     private var googleClientPasteSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Paste Google OAuth Client JSON")
-                .font(.headline)
+                .appFont(.headline)
             Text("The contents of the client_secret….json downloaded from the Google Cloud Console.")
-                .font(.caption)
+                .appFont(.caption)
                 .foregroundStyle(.secondary)
             TextEditor(text: $pastedClientJSON)
-                .font(.system(.caption, design: .monospaced))
+                .appMonoFont(.caption)
                 .frame(minHeight: 180)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
             HStack {
@@ -1036,7 +1051,7 @@ struct SettingsView: View {
                         .frame(width: 12, height: 12)
                 }
                 Text(name)
-                    .font(.caption.weight(isSelected ? .semibold : .regular))
+                    .appFont(.caption, weight: isSelected ? .semibold : .regular)
             }
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity)
@@ -1073,10 +1088,10 @@ struct SettingsView: View {
     private func promptGroupLabel(_ title: String, isExpanded: Binding<Bool>) -> some View {
         HStack {
             Text(title)
-                .font(.body.weight(.medium))
+                .appFont(.body, weight: .medium)
             Spacer()
             Text(isExpanded.wrappedValue ? "Click to collapse" : "Click to expand & customize")
-                .font(.caption)
+                .appFont(.caption)
                 .foregroundStyle(.tertiary)
         }
         .contentShape(Rectangle())
@@ -1105,6 +1120,7 @@ struct SettingsView: View {
             notesVerbosity: verbosity,
             theme: themeName,
             accentOverride: accentOverride,
+            fontFamily: fontFamily,
             dosaNotesColor: dosaColor,
             notesPrompt: notesPrompt,
             transcriptPrompt: transcriptPrompt,
@@ -1152,6 +1168,7 @@ struct SettingsView: View {
             if let value = snapshot.notesVerbosity { verbosity = min(max(value, 0), 4) }
             if let value = snapshot.theme, Theme.presetNames.contains(value) { themeName = value }
             if let value = snapshot.accentOverride, Theme.accentOverrideOptions.contains(value) { accentOverride = value }
+            if let value = snapshot.fontFamily, AppFontChoice(rawValue: value) != nil { fontFamily = value }
             if let value = snapshot.dosaNotesColor,
                (["Theme Default"] + AppSettings.dosaColorOptions).contains(value) { dosaColor = value }
             if let value = snapshot.notesPrompt { notesPrompt = value }

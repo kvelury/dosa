@@ -27,7 +27,7 @@ struct SetupBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(Theme.current.highlightColor)
                 Text(message)
-                    .font(.callout)
+                    .appFont(.callout)
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button("Open Settings", action: onOpenSettings)
@@ -86,7 +86,7 @@ struct CalendarSetupBanner: View {
             Image(systemName: "calendar")
                 .foregroundStyle(Theme.current.highlightColor)
             Text("Connect Google Calendar in Settings to see upcoming meetings on your home screen.")
-                .font(.callout)
+                .appFont(.callout)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button("Open Settings", action: onOpenSettings)
@@ -472,7 +472,7 @@ struct NotesStyleSlider: View {
                 Spacer()
                 Text("More Detailed")
             }
-            .font(.caption)
+            .appFont(.caption)
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity)
         }
@@ -503,10 +503,10 @@ struct RecordingAwayToast: View {
                 AnimatedEllipsis(ringPhase: ringPhase)
             }
             Text(TimeFormatting.clock(elapsed))
-                .font(.system(.callout, design: .monospaced))
+                .appMonoFont(.callout)
                 .foregroundStyle(.secondary)
         }
-        .font(.callout)
+        .appFont(.callout)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .floatingChrome(in: shape)
@@ -567,9 +567,9 @@ struct MultiSelectionView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.secondary)
             Text("\(count) notes selected")
-                .font(.title2.weight(.semibold))
+                .appFont(.title2, weight: .semibold)
             Text("Right-click the selection in the sidebar to pin, move, or delete these notes together, or drag them into a folder.")
-                .font(.callout)
+                .appFont(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
@@ -595,7 +595,7 @@ struct ErrorDialogView: View {
                     .font(.title2)
                     .foregroundStyle(.yellow)
                 Text("Something went wrong")
-                    .font(.headline)
+                    .appFont(.headline)
                 Spacer()
             }
 
@@ -607,7 +607,7 @@ struct ErrorDialogView: View {
                 DisclosureGroup(isExpanded: $showDetails) {
                     ScrollView {
                         Text(detail)
-                            .font(.system(size: 11, design: .monospaced))
+                            .appMonoFont(size: 11)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
@@ -616,7 +616,7 @@ struct ErrorDialogView: View {
                     .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.3)))
                 } label: {
                     Text(showDetails ? "Hide technical details" : "Show technical details")
-                        .font(.callout)
+                        .appFont(.callout)
                         .foregroundStyle(.secondary)
                         .contentShape(Rectangle())
                         .onTapGesture {

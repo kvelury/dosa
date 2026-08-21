@@ -15,7 +15,7 @@ struct DeletedNoteView: View {
                         "In Deleted Notes — permanently removed in \(store.daysRemaining(for: note)) days",
                         systemImage: "trash"
                     )
-                    .font(.callout)
+                    .appFont(.callout)
                     Spacer()
                     Button("Restore") {
                         store.restore(noteId)
@@ -32,13 +32,13 @@ struct DeletedNoteView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(note.displayTitle)
-                            .font(.system(size: 26, weight: .bold))
+                            .appFont(.noteTitle)
                         Text(note.createdAt, style: .date)
-                            .font(.callout)
+                            .appFont(.callout)
                             .foregroundStyle(.secondary)
                         Divider()
                         Text(previewText(note))
-                            .font(.system(size: 14))
+                            .appFont(size: 14)
                             .lineSpacing(3)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)

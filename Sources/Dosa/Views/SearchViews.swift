@@ -26,7 +26,7 @@ struct GlobalSearchView: View {
                     .foregroundStyle(.secondary)
                 TextField("Search all notes and transcripts", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.title3)
+                    .appFont(.title3)
                     .focused($searchFocused)
                 Button("Done") {
                     dismiss()
@@ -74,7 +74,7 @@ struct GlobalSearchView: View {
         VStack {
             Spacer()
             Text(message)
-                .font(.callout)
+                .appFont(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 400)
@@ -136,17 +136,17 @@ struct NoteSearchView: View {
 
             if enabledFields.isEmpty {
                 Text("Select at least one filter.")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if trimmedQuery.count < 2 {
                 Text("Type at least 2 characters.")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if results.isEmpty {
                 Text("No matches.")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -213,7 +213,7 @@ private struct SearchFieldToggle: View {
                         .font(.system(size: 8, weight: .bold))
                 }
                 Text(field.rawValue)
-                    .font(.caption.weight(.medium))
+                    .appFont(.caption, weight: .medium)
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
@@ -236,11 +236,11 @@ struct SearchResultRow: View {
             HStack(spacing: 8) {
                 if showTitle {
                     Text(match.noteTitle)
-                        .font(.callout.weight(.semibold))
+                        .appFont(.callout, weight: .semibold)
                         .lineLimit(1)
                 }
                 Text(match.field.rawValue)
-                    .font(.caption2.weight(.medium))
+                    .appFont(.caption2, weight: .medium)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(.quaternary.opacity(0.6)))
@@ -248,7 +248,7 @@ struct SearchResultRow: View {
                 Spacer()
             }
             Text(SearchService.attributedSnippet(match.snippet, query: query))
-                .font(.caption)
+                .appFont(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
         }

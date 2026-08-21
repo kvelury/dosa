@@ -10,7 +10,7 @@ struct TranscriptView: View {
         VStack(spacing: 0) {
             HStack {
                 Label("Full Transcript", systemImage: "text.bubble")
-                    .font(.headline)
+                    .appFont(.headline)
                 Spacer()
                 Button {
                     NSPasteboard.general.clearContents()

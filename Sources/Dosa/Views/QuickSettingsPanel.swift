@@ -68,12 +68,12 @@ struct QuickSettingsPanel: View {
     private var modelRow: some View {
         HStack(spacing: 10) {
             Text("Model")
-                .font(.system(size: 12, weight: .medium))
+                .appFont(size: 12, weight: .medium)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             if configuredProviders.isEmpty {
                 Text("No LLM configured")
-                    .font(.system(size: 12))
+                    .appFont(size: 12)
                     .foregroundStyle(.tertiary)
             } else {
                 modelMenu
@@ -106,7 +106,7 @@ struct QuickSettingsPanel: View {
             // so the whole chip opens the menu, not just the glyph.
             HStack(spacing: 5) {
                 Text(activeModel)
-                    .font(.system(size: 12, weight: .medium))
+                    .appFont(size: 12, weight: .medium)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .resizable()
@@ -130,7 +130,7 @@ struct QuickSettingsPanel: View {
     private var notesStyleRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Notes Style: \(AppSettings.verbosityLevelNames[min(max(verbosity, 0), 4)])")
-                .font(.system(size: 12, weight: .medium))
+                .appFont(size: 12, weight: .medium)
                 .foregroundStyle(.secondary)
             NotesStyleSlider(level: $verbosity)
                 .controlSize(.small)

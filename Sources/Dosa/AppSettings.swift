@@ -8,6 +8,7 @@ enum AppSettings {
     static let dosaColorKey = "dosaNotesColor"
     static let themeKey = "themeName"
     static let accentOverrideKey = "accentOverride"
+    static let fontFamilyKey = "fontFamily"
     static let notificationsEnabledKey = "notificationsEnabled"
     static let automaticModeKey = "automaticMode"
     static let automaticUpdateCheckKey = "automaticUpdateCheck"   // Bool, default true
@@ -78,6 +79,10 @@ enum AppSettings {
     static var currentAccentOverride: String {
         let stored = UserDefaults.standard.string(forKey: accentOverrideKey) ?? "Theme Default"
         return Theme.accentOverrideOptions.contains(stored) ? stored : "Theme Default"
+    }
+
+    static var currentFontChoice: AppFontChoice {
+        AppFontChoice.resolved(UserDefaults.standard.string(forKey: fontFamilyKey) ?? "")
     }
     static let apiKeyKey = "geminiAPIKey"
     static let modelKey = "geminiModel"

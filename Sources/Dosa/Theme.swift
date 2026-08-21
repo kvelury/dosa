@@ -45,9 +45,10 @@ enum Theme {
     }
 
     /// Changes whenever any styling-relevant setting changes; open editors
-    /// compare against it to know when to re-style.
+    /// compare against it to know when to re-style. Includes font so a typeface
+    /// change restyles markdown without a Settings-close rebuild.
     static var styleFingerprint: String {
-        "\(AppSettings.currentThemeName)|\(AppSettings.currentAccentOverride)|\(AppSettings.currentDosaColorName)"
+        "\(AppSettings.currentThemeName)|\(AppSettings.currentAccentOverride)|\(AppSettings.currentDosaColorName)|\(AppSettings.currentFontChoice.rawValue)"
     }
 
     static func accentOverrideColor(named name: String) -> NSColor? {

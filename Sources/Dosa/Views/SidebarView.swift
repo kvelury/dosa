@@ -98,7 +98,7 @@ struct SidebarView: View {
                         Image(systemName: "gearshape")
                             .font(.system(size: 16, weight: .medium))
                         Text("Settings")
-                            .font(.system(size: 14))
+                            .appFont(size: 14)
                     }
                 }
                 .buttonStyle(.plain)
@@ -120,7 +120,7 @@ struct SidebarView: View {
                         .help("An update is available — open Settings to install it")
                     }
                     Text("v\(BuildInfo.shortVersion)")
-                        .font(.caption2)
+                        .appFont(.caption2)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -205,7 +205,7 @@ struct SidebarView: View {
                 }
                 if store.activeNotes.isEmpty && store.folders.isEmpty {
                     Text("No notes yet — click +")
-                        .font(.callout)
+                        .appFont(.callout)
                         .foregroundStyle(.secondary)
                 }
             } header: {
@@ -219,7 +219,7 @@ struct SidebarView: View {
                     }
                     if store.deletedNotes.isEmpty {
                         Text("Empty")
-                            .font(.callout)
+                            .appFont(.callout)
                             .foregroundStyle(.secondary)
                     } else {
                         Button {
@@ -232,7 +232,7 @@ struct SidebarView: View {
                     }
                 } label: {
                     Label("Deleted Notes", systemImage: "trash")
-                        .font(.system(size: 14))
+                        .appFont(size: 14)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             deletedNotesExpanded.toggle()
@@ -241,7 +241,7 @@ struct SidebarView: View {
             } footer: {
                 if !store.deletedNotes.isEmpty {
                     Text("Deleted notes are removed permanently after \(NotesStore.trashRetentionDays) days.")
-                        .font(.caption2)
+                        .appFont(.caption2)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -339,7 +339,7 @@ private struct FolderRow: View {
             }
         } label: {
             Label(folder.name, systemImage: "folder")
-                .font(.system(size: 14))
+                .appFont(size: 14)
                 .padding(.vertical, 2)
                 .padding(.horizontal, 4)
                 .background(
@@ -409,11 +409,11 @@ private struct NoteRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(note.displayTitle)
-                .font(.system(size: 14))
+                .appFont(size: 14)
                 .lineLimit(1)
             HStack(spacing: 6) {
                 Text(note.createdAt, style: .date)
-                    .font(.system(size: 12))
+                    .appFont(size: 12)
                 if note.recordingFileName != nil {
                     Image(systemName: "waveform")
                         .font(.system(size: 10))
@@ -492,11 +492,11 @@ private struct DeletedNoteRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(note.displayTitle)
-                .font(.system(size: 14))
+                .appFont(size: 14)
                 .lineLimit(1)
                 .foregroundStyle(.secondary)
             Text("\(store.daysRemaining(for: note)) days left")
-                .font(.system(size: 12))
+                .appFont(size: 12)
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 1)
