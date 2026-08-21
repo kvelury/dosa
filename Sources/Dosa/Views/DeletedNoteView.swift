@@ -58,7 +58,7 @@ struct DeletedNoteView: View {
                 Text("The note, its transcript, and its recording will be gone forever. This cannot be undone.")
             }
         } else {
-            WelcomeView()
+            HomeView()
         }
     }
 

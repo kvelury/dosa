@@ -77,6 +77,56 @@ struct SetupBannerInset: ViewModifier {
     }
 }
 
+struct CalendarSetupBanner: View {
+    @EnvironmentObject private var calendar: GoogleCalendarManager
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "calendar")
+                .foregroundStyle(Theme.current.highlightColor)
+            Text("Connect Google Calendar in Settings to see upcoming meetings on your home screen.")
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Open Settings", action: onOpenSettings)
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.current.accentColor)
+                .controlSize(.small)
+            Button("Dismiss") {
+                calendar.dismissSetupBanner()
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Theme.current.cardFillColor)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+}
+
+struct CalendarSetupBannerInset: ViewModifier {
+    let isHomeVisible: Bool
+    let onOpenSettings: () -> Void
+    @EnvironmentObject private var calendar: GoogleCalendarManager
+
+    private var needed: Bool {
+        isHomeVisible && calendar.showSetupBanner
+    }
+
+    func body(content: Content) -> some View {
+        if needed {
+            content.safeAreaInset(edge: .top, spacing: 0) {
+                CalendarSetupBanner(onOpenSettings: onOpenSettings)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private func setupBannerMessage(
     userName: String,
     apiKey: String,

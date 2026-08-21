@@ -18,24 +18,34 @@ final class NotesStore: ObservableObject {
     private var storeURL: URL { dataDirectory.appendingPathComponent("store.json") }
     private var saveTask: Task<Void, Never>?
 
+    static var applicationSupportDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("Dosa", isDirectory: true)
+    }
+
     private struct Snapshot: Codable {
         var notes: [Note] = []
         var folders: [Folder] = []
     }
 
-    init() {
+    convenience init() {
+        self.init(dataDirectory: Self.applicationSupportDirectory, recoverInterrupted: true)
+    }
+
+    init(dataDirectory: URL, recoverInterrupted: Bool) {
         let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        dataDirectory = appSupport.appendingPathComponent("Dosa", isDirectory: true)
+        self.dataDirectory = dataDirectory
         recordingsDirectory = dataDirectory.appendingPathComponent("Recordings", isDirectory: true)
         try? fm.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true)
         load()
         purgeExpiredDeletedNotes()
-        recoverInterruptedRecordings()
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.persistNow()
+        if recoverInterrupted {
+            recoverInterruptedRecordings()
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.persistNow()
+            }
         }
     }
 
@@ -143,7 +153,36 @@ final class NotesStore: ObservableObject {
     func moveToTrash(_ id: UUID) {
         guard var note = note(id: id) else { return }
         note.deletedAt = Date()
+        note.calendarEventUID = nil
+        note.calendarEventInstanceStart = nil
+        note.calendarHTMLLink = nil
+        note.calendarID = nil
         update(note)
+    }
+
+    func activeNote(for identity: CalendarEventIdentity) -> Note? {
+        CalendarNoteLinking.activeNote(
+            in: notes,
+            identity: identity,
+            uid: \.calendarEventUID,
+            instanceStart: \.calendarEventInstanceStart,
+            isDeleted: \.isDeleted
+        )
+    }
+
+    @discardableResult
+    func openOrCreateNote(for event: CalendarEvent) -> Note {
+        if let existing = activeNote(for: event.identity) {
+            return existing
+        }
+        var note = Note(title: event.title)
+        note.calendarEventUID = event.identity.iCalUID
+        note.calendarEventInstanceStart = event.identity.instanceStart
+        note.calendarHTMLLink = event.googleCalendarURL?.absoluteString
+        note.calendarID = event.calendarID
+        notes.insert(note, at: 0)
+        scheduleSave()
+        return note
     }
 
     func restore(_ id: UUID) {

@@ -81,6 +81,31 @@ plist_set DosaBuildDate    string "$COMMIT_DATE"
 plist_set DosaBuildChannel string "$BUILD_CHANNEL"
 plist_set DosaBuildDirty   bool   "$DIRTY"
 
+echo "==> Injecting Google Calendar OAuth client (if present)…"
+python3 - "$PLIST" Resources/GoogleCalendarOAuth.json <<'PY'
+import json, plistlib, sys
+plist_path, oauth_path = sys.argv[1], sys.argv[2]
+try:
+    with open(oauth_path, "r", encoding="utf-8") as handle:
+        oauth = json.load(handle)
+except FileNotFoundError:
+    print("    No Resources/GoogleCalendarOAuth.json — Google Calendar sign-in disabled in this build.")
+    sys.exit(0)
+client_id = str(oauth.get("client_id") or "").strip()
+client_secret = str(oauth.get("client_secret") or "").strip()
+if not client_id:
+    print("    GoogleCalendarOAuth.json has no client_id — Google Calendar sign-in disabled in this build.")
+    sys.exit(0)
+with open(plist_path, "rb") as handle:
+    plist = plistlib.load(handle)
+plist["DOSAGoogleCalendarClientID"] = client_id
+if client_secret:
+    plist["DOSAGoogleCalendarClientSecret"] = client_secret
+with open(plist_path, "wb") as handle:
+    plistlib.dump(plist, handle)
+print("    Injected Google Calendar OAuth client into Info.plist.")
+PY
+
 echo "==> Signing (ad-hoc)…"
 codesign --force --sign - "$APP"
 

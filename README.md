@@ -17,8 +17,9 @@ Because audio is intercepted at the OS level (not via meeting-platform APIs), it
 - **Organization** — nested folders, drag & drop (into and out of folders), multi-select (⌘/⇧-click), pinning with a dedicated Pinned section, swipe gestures (right = pin, left = delete), 30-day trash.
 - **Search** — global (⌘K) across titles, notes, Dosa notes, and transcripts with filter chips; in-note search (⌘F); results jump to and flash the exact match.
 - **Notion export** — connect your own Notion account in the browser (OAuth via Notion's hosted MCP server — no integration registration, no embedded secrets). Dosa creates a private **"Dosa Notes" database** (Title + Date) in your workspace; exports create entries there and re-exports update the same page in place.
+- **Google Calendar home** — connect Google in Settings (browser consent). Upcoming meetings from the calendars you pick show up as a scrolling list on the home screen for the next 30 days. Click a meeting to see details and create a note, or create a note and start recording. The classic welcome screen stays until Calendar is connected.
 - **Themes** — five preset palettes (Classic, Crepe, Masala, Chutney, Slate) with light/dark variants, plus accent and diff-color overrides and an Auto/Light/Dark appearance switch.
-- **Exports & backup** — notes, transcript, and recording export to `~/Downloads`; settings export/import as JSON (API key and Notion credentials deliberately excluded).
+- **Exports & backup** — notes, transcript, and recording export to `~/Downloads`; settings export/import as JSON (API keys, Notion credentials, and Google Calendar tokens deliberately excluded).
 
 ## Building & running
 
@@ -32,7 +33,9 @@ open build/Dosa.app
 ./build.sh --install
 ```
 
-`build.sh` compiles the Swift package, regenerates the brand assets (app icon + in-app mark) from the source SVGs in `Resources/Branding/`, assembles `build/Dosa.app`, stamps that bundle with the git commit it was built from, and ad-hoc signs it. `build/` is generated and untracked. For a release-channel stamp locally, `DOSA_RELEASE_BUILD=1 ./build.sh` (refuses a dirty tree). For quick iteration, `swift build` alone typechecks everything (but won't refresh the branding assets or produce a runnable `.app`).
+`build.sh` compiles the Swift package, regenerates the brand assets (app icon + in-app mark) from the source SVGs in `Resources/Branding/`, assembles `build/Dosa.app`, injects Google Calendar OAuth client credentials from `Resources/GoogleCalendarOAuth.json` when that file exists, stamps that bundle with the git commit it was built from, and ad-hoc signs it. `build/` is generated and untracked. For a release-channel stamp locally, `DOSA_RELEASE_BUILD=1 ./build.sh` (refuses a dirty tree). For quick iteration, `swift build` alone typechecks everything (but won't refresh the branding assets or produce a runnable `.app`). `swift run DosaCalendarChecks` exercises Calendar decoding, meeting filtering, cache fallback, and one-note-per-event linking. (The Command Line Tools toolchain this project builds with does not include XCTest.)
+
+Google Calendar sign-in needs a Desktop OAuth client. Copy `Resources/GoogleCalendarOAuth.json.example` to `Resources/GoogleCalendarOAuth.json`, fill in the client ID and secret, and rebuild. That live file is gitignored. Builds without it still succeed; Settings will say Calendar is unavailable.
 
 Installing is opt-in: `--install` quits any running copy, then replaces `/Applications/Dosa.app`. Plain `./build.sh` never touches `/Applications`, so the edit-build-run loop can't silently swap the app you have installed. Notes and recordings live in `~/Library/Application Support/Dosa/` either way, so both copies read the same data and upgrading never migrates anything.
 
@@ -48,6 +51,7 @@ Installing is opt-in: `--install` quits any running copy, then replaces `/Applic
 3. **Your name** — Settings → Profile, so transcripts label your voice correctly.
 4. **Automatic mode (optional)** — Settings → Automatic Mode, to transcribe and generate as soon as a recording stops instead of pressing Generate Notes each time. Off by default, and it stays off in practice until an API key is saved.
 5. **Notion (optional)** — Settings → Notion → Connect; approve in the browser and Dosa sets up the rest.
+6. **Google Calendar (optional)** — Settings → Google Calendar → Connect; approve in the browser, then pick calendars. The home screen switches to upcoming meetings. A one-time banner on first launch points here; you can dismiss it.
 
 ## Updating
 
@@ -64,7 +68,7 @@ Automatic checks on launch are on by default and stay silent unless an update ex
 | ⌘N | New note |
 | ⌘O | Import an audio or video file into a new note |
 | ⌘R | Start / stop recording |
-| ⌘W | Close note (back to welcome) |
+| ⌘W | Close note (back to home) |
 | ⌘K | Search all notes & transcripts |
 | ⌘F | Search within the open note |
 | ⌘Z / ⇧⌘Z | Undo / redo in the editor |
@@ -73,9 +77,12 @@ Automatic checks on launch are on by default and stay silent unless an update ex
 ## Data locations
 
 - Notes & folders: `~/Library/Application Support/Dosa/store.json`
+- Calendar cache: `~/Library/Application Support/Dosa/calendar-cache.json`
 - Recordings: `~/Library/Application Support/Dosa/Recordings/<note-id>-<timestamp>.m4a`, with `-mic` / `-system` side tracks beside each one. Names are never reused, so replacing a note's audio leaves the previous file on disk (unlinked from the note) rather than overwriting it — handy if you ever replace one by mistake.
 - In-progress captures: `Recordings/<note-id>-<timestamp>-{mic,system}.caf`, deleted once the recording is safely mixed down. Anything left there is an interrupted session, recovered automatically on next launch.
-- Settings, API key, Notion tokens: app `UserDefaults` (never in this repo)
+- Settings and API keys: app `UserDefaults` (never in this repo)
+- Notion tokens: app `UserDefaults`
+- Google Calendar tokens: macOS Keychain (`com.dosa.meetingnotes.google-calendar`)
 
 ## Architecture
 
@@ -84,9 +91,11 @@ See **[docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md)** — the full techni
 High-level map:
 
 ```
-Sources/Dosa/
+Sources/DosaApp/DosaEntry.swift      @main trampoline
+Sources/Dosa/                        DosaKit library
   DosaApp / AppSettings / Theme      app entry, settings registry, theming tokens
   Models / NotesStore                data model + debounced JSON persistence
+  NoteTemplates                      built-in and user note templates
   AudioRecorder / AudioPlayer        capture (mic + ScreenCaptureKit), mixdown, playback
   RecordingImporter                  file picker + format gate for imported audio/video
   GeminiClient / AnthropicClient /
@@ -95,11 +104,13 @@ Sources/Dosa/
   UpdateManager                      GitHub Releases check, download, install helper
   DiffEngine / SearchService         word diff, search + reveal machinery
   Notion/                            OAuth (DCR+PKCE), minimal MCP client, export logic
+  GoogleCalendar/                    OAuth+Keychain, Calendar REST, hourly sync, homepage
   Views/                             SwiftUI + AppKit-backed markdown editor
     MenuBarMenu.swift                windowless new/import/record/settings/quit actions
   Branding.swift                     in-app mark + animated template menu-bar icons
   QuitGuard.swift                    confirms quit while work is running
   RecordingCommand.swift             start/stop recording from ⌘R, File menu, and the menu bar
+Sources/DosaCalendarChecks/          Calendar checks runnable without XCTest
 
 Resources/Branding/                  source SVGs for app, in-app, and menu-bar marks
 Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into the shipped
@@ -117,4 +128,5 @@ Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into th
 - Ad-hoc signing means permission grants can reset on rebuild, and **on every in-app update** — there is no Developer ID / notarization. That re-prompt is expected; see [Updating](#updating).
 - Released builds are **arm64-only**. An Intel Mac will not be offered an update (the updater refuses an incompatible slice rather than installing a bundle that cannot launch).
 - Notion sync is one-way (export/update); bi-directional sync is designed but not built (see the design doc §10.4).
+- Google Calendar uses the REST API (not Google's preview MCP server). Sign-in needs a Dosa-owned Desktop OAuth client in `Resources/GoogleCalendarOAuth.json` at build time, and Google's verification before broad distribution. Creating a note from a meeting prefills only the title — it does not apply a template or copy calendar description/attendees into the note.
 - The OpenAI provider tab in Settings is a stub; Gemini, Anthropic, and DeepSeek are the working providers.
