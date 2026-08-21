@@ -43,11 +43,11 @@ struct WelcomeView: View {
             VStack(spacing: 26) {
                 VStack(spacing: 10) {
                     Text(greeting)
-                        .font(.system(size: 36, weight: .bold))
+                        .appFont(.hero)
                         .multilineTextAlignment(.center)
 
                     Text("Record meetings straight from your Mac's audio — Zoom, Meet, Teams, Huddles, anything — jot quick notes, and let Dosa turn them into polished meeting notes.")
-                        .font(.body)
+                        .appFont(.body)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 460)
@@ -61,7 +61,7 @@ struct WelcomeView: View {
                 }
 
                 Text("Click + at the top of the sidebar to create your first note.")
-                    .font(.callout)
+                    .appFont(.callout)
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 24)
@@ -93,13 +93,13 @@ private struct ShortcutHint: View {
     var body: some View {
         HStack(spacing: 7) {
             Text(keys)
-                .font(.system(size: 13, weight: .semibold).monospaced())
+                .appMonoFont(size: 13, weight: .semibold)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Theme.current.cardFillColor))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
             Text(label)
-                .font(.system(size: 13))
+                .appFont(size: 13)
                 .foregroundStyle(.secondary)
                 // Headroom for the longest label ("Start Recording") at minimum width.
                 .lineLimit(1)
@@ -120,12 +120,12 @@ private struct StatCard: View {
                 .font(.title3)
                 .foregroundStyle(Theme.current.highlightColor)
             Text(value)
-                .font(.title2.weight(.semibold))
+                .appFont(.title2, weight: .semibold)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
             Text(label)
-                .font(.caption)
+                .appFont(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }

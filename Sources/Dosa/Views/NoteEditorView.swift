@@ -156,7 +156,7 @@ struct NoteEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             TextField("Untitled Note", text: note.title)
                 .textFieldStyle(.plain)
-                .font(.system(size: 26, weight: .bold))
+                .appFont(.noteTitle)
             HStack(spacing: 8) {
                 EditorPill(action: { showDatePicker = true }) {
                     Text(current.createdAt.formatted(date: .long, time: .omitted))
@@ -233,10 +233,10 @@ struct NoteEditorView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 14) {
                     Label("Your notes", systemImage: "circle.fill")
-                        .font(.system(size: 13))
+                        .appFont(size: 13)
                         .foregroundStyle(.primary)
                     Label("Dosa additions", systemImage: "circle.fill")
-                        .font(.system(size: 13))
+                        .appFont(size: 13)
                         .foregroundStyle(DiffEngine.aiColor)
                     Spacer()
                 }
@@ -259,7 +259,7 @@ struct NoteEditorView: View {
                         Image(systemName: "lock")
                             .font(.caption)
                         Text("Read-only — Dosa has generated notes from these. Edit them in Dosa Notes.")
-                            .font(.caption)
+                            .appFont(.caption)
                         Spacer()
                     }
                     .foregroundStyle(.secondary)
@@ -382,7 +382,7 @@ struct NoteEditorView: View {
     private var scrubBar: some View {
         HStack(spacing: 10) {
             Text(TimeFormatting.clock(player.currentTime))
-                .font(.caption.monospacedDigit())
+                .appFont(.caption, monospacedDigit: true)
                 .foregroundStyle(.secondary)
             Slider(
                 value: Binding(
@@ -394,7 +394,7 @@ struct NoteEditorView: View {
             .controlSize(.small)
             .frame(minWidth: 260)
             Text(TimeFormatting.clock(player.duration))
-                .font(.caption.monospacedDigit())
+                .appFont(.caption, monospacedDigit: true)
                 .foregroundStyle(.secondary)
             Button {
                 player.stop()
@@ -413,14 +413,14 @@ struct NoteEditorView: View {
             if isRecordingThisNote {
                 RecordingWaveformView(levels: recorder.levelHistory)
                 Text(TimeFormatting.clock(recorder.elapsed))
-                    .font(.system(.body, design: .monospaced))
+                    .appMonoFont(.body)
                     .foregroundStyle(.red)
             }
             if isImporting {
                 ProgressView()
                     .controlSize(.small)
                 Text("Importing…")
-                    .font(.callout)
+                    .appFont(.callout)
                     .foregroundStyle(.secondary)
             }
             Divider()
@@ -466,7 +466,7 @@ struct NoteEditorView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Exporting to Notion…")
-                    .font(.callout)
+                    .appFont(.callout)
                     .foregroundStyle(.secondary)
             }
             if current.transcript != nil || current.enhancedMarkdown != nil {

@@ -134,6 +134,9 @@ final class PaddedTextView: NSTextView {
 
 struct MarkdownTextEditor: NSViewRepresentable {
     @Binding var text: String
+    /// Observed so a font change restyles the NSTextView without waiting for
+    /// Settings to close (the fingerprint comparison below does the restyle).
+    @AppStorage(AppSettings.fontFamilyKey) private var fontFamily = AppFontChoice.system.rawValue
     /// When set, tokens NOT present in this base text (i.e. Dosa's additions) are
     /// tinted with the diff color, while surviving user tokens stay primary.
     var diffAgainst: String?
@@ -193,7 +196,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
             padded.onMediaFileDrop = onMediaFileDrop
             padded.onMediaDragChanged = onMediaDragChanged
         }
-        let fingerprint = Theme.styleFingerprint
+        let fingerprint = "\(Theme.styleFingerprint)|\(fontFamily)"
         if textView.string != text {
             let selection = textView.selectedRange()
             textView.string = text
@@ -384,8 +387,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
 
 enum MarkdownStyler {
     static let baseFontSize: CGFloat = 14
-    static var baseFont: NSFont { .systemFont(ofSize: baseFontSize) }
-    static var monoFont: NSFont { .monospacedSystemFont(ofSize: baseFontSize - 1, weight: .regular) }
+    static var baseFont: NSFont { Typography.nsFont(size: baseFontSize) }
+    static var monoFont: NSFont { Typography.nsMono(size: baseFontSize - 1) }
     static let markerColor = NSColor.tertiaryLabelColor
     static var bulletColor: NSColor { Theme.current.highlight }
     static var codeSpanColor: NSColor { Theme.current.codeSpan }
@@ -420,7 +423,7 @@ enum MarkdownStyler {
         case 3: size = 16
         default: size = 14.5
         }
-        return .boldSystemFont(ofSize: size)
+        return Typography.nsFont(size: size, weight: .bold)
     }
 
     static func style(_ textView: NSTextView, diffBase: String? = nil) {

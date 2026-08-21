@@ -22,10 +22,10 @@ struct CalendarHomeView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(spacing: 8) {
                     Text(WelcomeGreeting.text(userName: userName))
-                        .font(.system(size: 36, weight: .bold))
+                        .appFont(.hero)
                         .multilineTextAlignment(.center)
                     Text(WelcomeGreeting.todayText)
-                        .font(.title3)
+                        .appFont(.title3)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
@@ -47,7 +47,7 @@ struct CalendarHomeView: View {
                             ForEach(dayGroups) { group in
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text(group.title)
-                                        .font(.headline)
+                                        .appFont(.headline)
                                         .foregroundStyle(.secondary)
                                     ForEach(group.events) { event in
                                         Button {
@@ -88,9 +88,11 @@ struct CalendarHomeView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Loading upcoming meetings…")
+                    .appFont(.body)
                     .foregroundStyle(.secondary)
             } else if let error = calendar.errorMessage {
                 Text(error)
+                    .appFont(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 Button("Try Again") {
@@ -98,6 +100,7 @@ struct CalendarHomeView: View {
                 }
             } else {
                 Text("No upcoming meetings in the next 30 days.")
+                    .appFont(.body)
                     .foregroundStyle(.secondary)
             }
         }
@@ -109,7 +112,7 @@ struct CalendarHomeView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Theme.current.highlightColor)
             Text(message)
-                .font(.callout)
+                .appFont(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
             if retry {
@@ -180,13 +183,13 @@ struct CalendarEventCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(event.displayTitle)
-                    .font(.headline)
+                    .appFont(.headline)
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 8)
                 if isHappeningNow {
                     Text("Now")
-                        .font(.caption.weight(.semibold))
+                        .appFont(.caption, weight: .semibold)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Theme.current.accentColor.opacity(0.18)))
@@ -194,21 +197,24 @@ struct CalendarEventCard: View {
                 }
             }
             Text(timeRange)
-                .font(.subheadline.monospacedDigit())
+                .appFont(.subheadline, monospacedDigit: true)
                 .foregroundStyle(.secondary)
             HStack(spacing: 10) {
                 Label(event.calendarName, systemImage: "calendar")
+                    .appFont(.caption)
                 if !event.otherAttendees.isEmpty {
                     Label("\(event.otherAttendees.count)", systemImage: "person.2")
+                        .appFont(.caption)
                 }
                 if event.location != nil {
                     Image(systemName: "mappin.and.ellipse")
+                        .font(.caption)
                 }
                 if !event.meetingLinks.isEmpty {
                     Image(systemName: "video")
+                        .font(.caption)
                 }
             }
-            .font(.caption)
             .foregroundStyle(.tertiary)
             .lineLimit(1)
         }

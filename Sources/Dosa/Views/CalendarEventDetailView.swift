@@ -21,7 +21,7 @@ struct CalendarEventDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(event.displayTitle)
-                    .font(.title2.weight(.semibold))
+                    .appFont(.title2, weight: .semibold)
                     .multilineTextAlignment(.leading)
                 Spacer()
                 if style == .sheet {
@@ -51,7 +51,7 @@ struct CalendarEventDetailView: View {
                     if !event.meetingLinks.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Meeting links")
-                                .font(.caption.weight(.semibold))
+                                .appFont(.caption, weight: .semibold)
                                 .foregroundStyle(.secondary)
                             ForEach(event.meetingLinks, id: \.absoluteString) { url in
                                 Button(url.absoluteString) {
@@ -112,7 +112,7 @@ struct CalendarEventDetailView: View {
     private func labeled(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .appFont(.caption, weight: .semibold)
                 .foregroundStyle(.secondary)
             Text(value)
                 .textSelection(.enabled)

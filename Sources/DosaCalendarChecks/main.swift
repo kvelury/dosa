@@ -4,11 +4,11 @@ import Foundation
 @main
 enum DosaCalendarChecks {
     static func main() {
-        let failures = CalendarSelfChecks.run()
+        let failures = CalendarSelfChecks.run() + TypographySelfChecks.run()
         if failures > 0 {
-            fputs("\(failures) Calendar check(s) failed.\n", stderr)
+            fputs("\(failures) check(s) failed.\n", stderr)
             exit(1)
         }
-        print("All Calendar checks passed.")
+        print("All checks passed.")
     }
 }
