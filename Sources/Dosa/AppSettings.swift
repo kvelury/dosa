@@ -54,6 +54,11 @@ enum AppSettings {
     static let notionTitlePropertyKey = "notionTitleProperty"
     static let notionDatabaseURLKey = "notionDatabaseURL"
 
+    // The OAuth client ID is not a secret — it is visible in the consent URL — so
+    // it stays out of the keychain, where every read costs an access prompt under
+    // ad-hoc signing. Only the client secret is keychained.
+    static let googleCalendarClientIDKey = "googleCalendarClientID"
+    static let googleCalendarClientIDMigratedKey = "googleCalendarClientIDMigrated"
     static let googleCalendarAccountKey = "googleCalendarAccountEmail"
     static let googleCalendarSelectedIDsKey = "googleCalendarSelectedCalendarIDs"
     static let googleCalendarOnboardingFinishedKey = "googleCalendarOnboardingFinished"

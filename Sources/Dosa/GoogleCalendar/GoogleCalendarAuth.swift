@@ -56,13 +56,22 @@ final class GoogleCalendarAuth {
 
     private var loopbackServer: LoopbackHTTPServer?
 
-    /// The OAuth client to authorize with, as configured in Settings. Kept in the
-    /// keychain rather than the app bundle so it survives an update replacing the
-    /// bundle, and so no credentials ever have to live in the repo or in a
-    /// published release.
+    /// The configured client's ID. Read constantly — SwiftUI re-evaluates it on
+    /// every render of the Settings section — so it deliberately lives in
+    /// UserDefaults, not the keychain. Under ad-hoc signing every keychain read
+    /// is a fresh "allow access" prompt, because each rebuild changes the code
+    /// signature the item's ACL was bound to.
+    static var clientID: String? {
+        _ = didMigrateClientID
+        let value = UserDefaults.standard.string(forKey: AppSettings.googleCalendarClientIDKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (value?.isEmpty == false) ? value : nil
+    }
+
+    /// The full client, secret included. Touches the keychain, so it is called
+    /// only on the two token-exchange paths — never from a view.
     static var credentials: Credentials? {
-        guard let clientID = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.clientIDAccount)?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !clientID.isEmpty else { return nil }
+        guard let clientID else { return nil }
         return Credentials(
             clientID: clientID,
             clientSecret: GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.clientSecretAccount)
@@ -70,8 +79,23 @@ final class GoogleCalendarAuth {
     }
 
     var hasCredentials: Bool {
-        Self.credentials != nil
+        Self.clientID != nil
     }
+
+    /// Earlier builds keychained the client ID too. Move it across so the prompt
+    /// storm stops without the client having to be re-added. `static let` gives
+    /// once-per-process; the defaults flag makes it once ever, so a fresh install
+    /// that never had a keychained ID does not pay a prompt on every launch to
+    /// discover that.
+    private static let didMigrateClientID: Void = {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: AppSettings.googleCalendarClientIDMigratedKey) else { return }
+        defaults.set(true, forKey: AppSettings.googleCalendarClientIDMigratedKey)
+        guard let keychained = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.clientIDAccount)
+        else { return }
+        defaults.set(keychained, forKey: AppSettings.googleCalendarClientIDKey)
+        GoogleCalendarKeychain.delete(account: GoogleCalendarKeychain.clientIDAccount)
+    }()
 
     // MARK: - Configuring the client
 
@@ -106,7 +130,7 @@ final class GoogleCalendarAuth {
     /// different client are invalid, and keeping them would surface later as an
     /// opaque invalid_grant on the next refresh.
     static func saveCredentials(_ credentials: Credentials) {
-        GoogleCalendarKeychain.set(credentials.clientID, account: GoogleCalendarKeychain.clientIDAccount)
+        UserDefaults.standard.set(credentials.clientID, forKey: AppSettings.googleCalendarClientIDKey)
         if let secret = credentials.clientSecret {
             GoogleCalendarKeychain.set(secret, account: GoogleCalendarKeychain.clientSecretAccount)
         } else {
@@ -117,6 +141,7 @@ final class GoogleCalendarAuth {
 
     /// Leaves Calendar unconfigured until another client is supplied.
     static func clearCredentials() {
+        UserDefaults.standard.removeObject(forKey: AppSettings.googleCalendarClientIDKey)
         GoogleCalendarKeychain.clearClientCredentials()
         GoogleCalendarKeychain.clearTokens()
     }
