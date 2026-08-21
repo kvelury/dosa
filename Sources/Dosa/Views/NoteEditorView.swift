@@ -240,20 +240,16 @@ struct NoteEditorView: View {
                     Label("Your notes", systemImage: "circle.fill")
                         .appFont(size: 13)
                         .foregroundStyle(.primary)
-                    // Authorship is signaled by color *and* an underline here —
-                    // the underline is the redundant, non-color channel that
-                    // carries into the body text itself (see applyDiffColors).
                     Label("Dosa additions", systemImage: "circle.fill")
                         .appFont(size: 13)
                         .foregroundStyle(DiffEngine.aiColor)
-                        .underline()
                     Spacer()
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 7)
                 .padding(.bottom, 7)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Legend: your notes shown in the default color, Dosa's additions underlined and tinted")
+                .accessibilityLabel("Legend: your notes shown in the default color, Dosa's additions tinted")
                 MarkdownTextEditor(
                     text: enhancedBinding(note: note),
                     diffAgainst: current.manualText,

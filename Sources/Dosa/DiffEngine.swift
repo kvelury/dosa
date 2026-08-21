@@ -94,12 +94,6 @@ enum DiffEngine {
             var piece = AttributedString((lastWasNewline ? "" : " ") + token)
             let isInserted = insertedOffsets.contains(offset)
             piece.foregroundColor = isInserted ? aiColor : .primary
-            // Underline, not just color, marks a Dosa addition (WCAG 1.4.1) —
-            // matches MarkdownStyler.applyDiffColors, the live editor's version
-            // of this same diff.
-            if isInserted {
-                piece.underlineStyle = .single
-            }
             if let level = headingLevel {
                 piece.font = Typography.font(size: Typography.scaled(headingFontSize(level: level)), weight: .bold)
             }
