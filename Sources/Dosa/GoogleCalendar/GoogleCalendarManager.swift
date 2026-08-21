@@ -168,6 +168,49 @@ final class GoogleCalendarManager: ObservableObject {
         updateBannerVisibility()
     }
 
+    // MARK: - OAuth client
+
+    var activeClientID: String? { GoogleCalendarAuth.credentials?.clientID }
+
+    func setCredentials(from url: URL) {
+        do {
+            setCredentials(try Data(contentsOf: url))
+        } catch {
+            errorMessage = "Could not read \(url.lastPathComponent): \(error.localizedDescription)"
+        }
+    }
+
+    func setCredentials(json: String) {
+        setCredentials(Data(json.utf8))
+    }
+
+    private func setCredentials(_ data: Data) {
+        let credentials: GoogleCalendarAuth.Credentials
+        do {
+            credentials = try GoogleCalendarAuth.parseClientJSON(data)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        // Tear the old session down first — disconnect() revokes the tokens,
+        // which only works while the client that minted them is still active.
+        disconnect()
+        GoogleCalendarAuth.saveCredentials(credentials)
+        refreshCredentialState()
+    }
+
+    func clearCredentials() {
+        disconnect()
+        GoogleCalendarAuth.clearCredentials()
+        refreshCredentialState()
+    }
+
+    private func refreshCredentialState() {
+        connectionState = hasCredentials ? .disconnected : .unavailable
+        clearError()
+        updateBannerVisibility()
+    }
+
     func dismissSetupBanner() {
         finishOnboarding()
         updateBannerVisibility()

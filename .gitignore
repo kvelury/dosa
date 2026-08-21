@@ -16,7 +16,3 @@
 # Per-machine Claude Code permissions. The skills alongside it are meant to be
 # shared; this one is not.
 /.claude/settings.local.json
-
-# Dosa-owned Google OAuth desktop client. Injected into Info.plist at build time;
-# never commit the live credentials.
-/Resources/GoogleCalendarOAuth.json
