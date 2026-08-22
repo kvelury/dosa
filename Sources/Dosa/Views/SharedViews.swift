@@ -664,22 +664,58 @@ struct ErrorDialogView: View {
     }
 }
 
+/// The chrome every editor-header popup shares — the sparkle pill's hover card, the date
+/// calendar, the meeting card, the recording actions. Opaque theme fill rather than a
+/// material: these cards sit directly over editor text, where a translucent backdrop makes
+/// contrast unmeasurable (the same reason `FloatingChrome` swaps to `cardFillColor` under
+/// Reduce Transparency). No shadow and no arrow — this is deliberately flatter than the
+/// floating bar's chrome, which is a different surface with a different job.
+struct PillPopoverCard: ViewModifier {
+    var horizontal: CGFloat = 10
+    var vertical: CGFloat = 6
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, horizontal)
+            .padding(.vertical, vertical)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.current.cardFillColor))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+    }
+}
+
+extension View {
+    func pillPopoverCard(horizontal: CGFloat = 10, vertical: CGFloat = 6) -> some View {
+        modifier(PillPopoverCard(horizontal: horizontal, vertical: vertical))
+    }
+}
+
 /// A themed capsule chip matching the homepage meeting cards' fill and hairline
 /// border. Pass `action` to make it clickable with a hover cue; pass `info` to
-/// reveal a themed card below it on hover; omit both for a static chip like
-/// the recording-duration indicator.
-struct EditorPill<PillLabel: View>: View {
+/// reveal a themed card below it on hover; pass `isPanelPresented` for a
+/// click-toggled panel in that same card chrome; omit all three for a static chip.
+struct EditorPill<PillLabel: View, Panel: View>: View {
     var action: (() -> Void)?
     var info: String?
+    var isPanelPresented: Binding<Bool>?
     @ViewBuilder var label: PillLabel
+    @ViewBuilder var panel: Panel
 
     @State private var isHovering = false
+    @FocusState private var panelFocused: Bool
 
-    private var tracksHover: Bool { action != nil || info != nil }
+    private var tracksHover: Bool { action != nil || info != nil || isPanelPresented != nil }
+    private var isPanelOpen: Bool { isPanelPresented?.wrappedValue == true }
 
     var body: some View {
         Group {
-            if let action {
+            if isPanelPresented != nil {
+                Button {
+                    isPanelPresented?.wrappedValue.toggle()
+                } label: {
+                    content
+                }
+                .buttonStyle(.plain)
+            } else if let action {
                 Button(action: action) { content }
                     .buttonStyle(.plain)
             } else {
@@ -692,20 +728,36 @@ struct EditorPill<PillLabel: View>: View {
                     .appFont(size: 12)
                     .foregroundStyle(Theme.secondaryTextColor)
                     .fixedSize()
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.current.cardFillColor))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+                    .pillPopoverCard()
                     .allowsHitTesting(false)
                     .transition(.opacity)
                     .offset(y: 34)
+            } else if let isPanelPresented, isPanelPresented.wrappedValue {
+                panel
+                    .background(PanelMarker())
+                    .pillPopoverCard(horizontal: 12, vertical: 10)
+                    .onExitCommand { isPanelPresented.wrappedValue = false }
+                    .focused($panelFocused)
+                    .background(ClickOutsideCatcher { isPanelPresented.wrappedValue = false })
+                    .transition(.opacity)
+                    .offset(y: 34)
+                    .onAppear { panelFocused = true }
             }
         }
+        .onExitCommand {
+            isPanelPresented?.wrappedValue = false
+        }
         .animation(.easeOut(duration: 0.12), value: isHovering)
+        .animation(.easeOut(duration: 0.12), value: isPanelOpen)
+        .background {
+            if isPanelPresented != nil {
+                PanelMarker()
+            }
+        }
         .applyIf(tracksHover) { view in
             view.onHover { hovering in
                 isHovering = hovering
-                guard action != nil else { return }
+                guard action != nil || isPanelPresented != nil else { return }
                 if hovering {
                     NSCursor.pointingHand.push()
                 } else {
@@ -724,6 +776,270 @@ struct EditorPill<PillLabel: View>: View {
             .overlay(Capsule().strokeBorder(.quaternary))
             .overlay(Capsule().fill(Theme.current.accentColor.opacity(isHovering ? 0.10 : 0)))
             .contentShape(Capsule())
+    }
+}
+
+extension EditorPill where Panel == EmptyView {
+    init(action: (() -> Void)? = nil, info: String? = nil, @ViewBuilder label: () -> PillLabel) {
+        self.action = action
+        self.info = info
+        self.isPanelPresented = nil
+        self.label = label()
+        self.panel = EmptyView()
+    }
+}
+
+extension EditorPill {
+    init(
+        isPanelPresented: Binding<Bool>,
+        @ViewBuilder label: () -> PillLabel,
+        @ViewBuilder panel: () -> Panel
+    ) {
+        self.action = nil
+        self.info = nil
+        self.isPanelPresented = isPanelPresented
+        self.label = label()
+        self.panel = panel()
+    }
+}
+
+/// Closes an in-hierarchy popup when a click lands anywhere outside it. Needed because
+/// `EditorPill`'s panels are overlays, not popovers, so nothing dismisses them for free.
+/// Same mechanism as `SidebarDeselectCatcher`: a zero-size NSView installing a local
+/// left-mouse-down monitor, walking the hit-test chain from the clicked view upward.
+struct ClickOutsideCatcher: NSViewRepresentable {
+    let onOutsideClick: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = MonitorView()
+        view.onOutsideClick = onOutsideClick
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? MonitorView)?.onOutsideClick = onOutsideClick
+    }
+
+    final class MonitorView: NSView {
+        var onOutsideClick: (() -> Void)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil {
+                removeMonitor()
+            } else if monitor == nil {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+                    self?.handle(event)
+                    return event
+                }
+            }
+        }
+
+        deinit {
+            removeMonitor()
+        }
+
+        private func removeMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+        }
+
+        private func handle(_ event: NSEvent) {
+            guard let window, event.window === window, let content = window.contentView else { return }
+            var view = content.hitTest(event.locationInWindow)
+            var inside = false
+            while let current = view {
+                if current is PanelMarkerView {
+                    inside = true
+                    break
+                }
+                // `.background(PanelMarker())` is a sibling of the SwiftUI content,
+                // not an ancestor. Treat a marker sitting on this container as inside
+                // so the pill and its overlay share one "inside" region.
+                if current.subviews.contains(where: { $0 is PanelMarkerView }) {
+                    inside = true
+                    break
+                }
+                view = current.superview
+            }
+            if !inside {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onOutsideClick?()
+                }
+            }
+        }
+    }
+}
+
+/// Marker the walk looks for. A click inside the panel hits a descendant of this view,
+/// so the walk finds it and the panel stays open.
+final class PanelMarkerView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private struct PanelMarker: NSViewRepresentable {
+    func makeNSView(context: Context) -> PanelMarkerView {
+        PanelMarkerView()
+    }
+
+    func updateNSView(_ nsView: PanelMarkerView, context: Context) {}
+}
+
+/// App-drawn month grid so the selected-day fill and today ring follow
+/// `Theme.current.accentColor`. `NSDatePicker` (under `DatePicker(.graphical)`)
+/// paints its selection with `NSColor.controlAccentColor` and ignores `.tint`.
+struct ThemedCalendarView: View {
+    @Binding var selection: Date
+    @State private var visibleMonth: Date
+
+    private let calendar = Calendar.current
+    private let cellSize: CGFloat = 30
+    private let cellSpacing: CGFloat = 4
+
+    init(selection: Binding<Date>) {
+        self._selection = selection
+        _visibleMonth = State(initialValue: selection.wrappedValue)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            weekdayStrip
+            dayGrid
+        }
+        .frame(width: gridWidth)
+    }
+
+    private var gridWidth: CGFloat {
+        cellSize * 7 + cellSpacing * 6
+    }
+
+    private var header: some View {
+        HStack {
+            Button {
+                shiftMonth(-1)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Previous month")
+
+            Spacer()
+
+            Text(monthTitle)
+                .appFont(size: 13)
+
+            Spacer()
+
+            Button {
+                shiftMonth(1)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Next month")
+        }
+    }
+
+    private var weekdayStrip: some View {
+        HStack(spacing: cellSpacing) {
+            ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                Text(symbol)
+                    .appFont(size: 11)
+                    .foregroundStyle(Theme.secondaryTextColor)
+                    .frame(width: cellSize)
+            }
+        }
+    }
+
+    private var dayGrid: some View {
+        LazyVGrid(columns: columns, spacing: cellSpacing) {
+            ForEach(0..<leadingBlankCount, id: \.self) { index in
+                Color.clear
+                    .frame(width: cellSize, height: cellSize)
+                    .accessibilityHidden(true)
+                    .id("blank-\(index)")
+            }
+            ForEach(daysInMonth, id: \.self) { day in
+                dayCell(day)
+            }
+        }
+    }
+
+    private func dayCell(_ day: Date) -> some View {
+        let isSelected = calendar.isDate(day, inSameDayAs: selection)
+        let isToday = calendar.isDateInToday(day)
+        return Button {
+            select(day)
+        } label: {
+            Text(dayNumber(day))
+                .appFont(size: 13)
+                .foregroundStyle(isSelected ? Theme.current.onAccentColor : Color.primary)
+                .frame(width: cellSize, height: cellSize)
+                .background {
+                    if isSelected {
+                        Circle().fill(Theme.current.accentColor)
+                    } else if isToday {
+                        Circle().strokeBorder(Theme.current.accentColor)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.fixed(cellSize), spacing: cellSpacing), count: 7)
+    }
+
+    private var monthTitle: String {
+        visibleMonth.formatted(.dateTime.month(.wide).year())
+    }
+
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        let offset = calendar.firstWeekday - 1
+        return Array(symbols[offset...]) + Array(symbols[..<offset])
+    }
+
+    private var firstOfVisibleMonth: Date {
+        calendar.date(from: calendar.dateComponents([.year, .month], from: visibleMonth)) ?? visibleMonth
+    }
+
+    private var leadingBlankCount: Int {
+        let weekday = calendar.component(.weekday, from: firstOfVisibleMonth)
+        return (weekday - calendar.firstWeekday + 7) % 7
+    }
+
+    private var daysInMonth: [Date] {
+        let range = calendar.range(of: .day, in: .month, for: visibleMonth) ?? 1..<1
+        return range.compactMap { day in
+            calendar.date(byAdding: .day, value: day - 1, to: firstOfVisibleMonth)
+        }
+    }
+
+    private func dayNumber(_ day: Date) -> String {
+        String(calendar.component(.day, from: day))
+    }
+
+    private func shiftMonth(_ delta: Int) {
+        guard let next = calendar.date(byAdding: .month, value: delta, to: firstOfVisibleMonth) else { return }
+        visibleMonth = next
+    }
+
+    /// Keep the existing time-of-day. `createdAt` orders the sidebar, and a
+    /// naive midnight assignment would silently reshuffle the note list.
+    private func select(_ day: Date) {
+        let time = calendar.dateComponents([.hour, .minute, .second], from: selection)
+        var parts = calendar.dateComponents([.year, .month, .day], from: day)
+        parts.hour = time.hour
+        parts.minute = time.minute
+        parts.second = time.second
+        if let combined = calendar.date(from: parts) { selection = combined }
     }
 }
 
