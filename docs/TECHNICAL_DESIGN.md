@@ -87,7 +87,7 @@ Sources/Dosa/            DosaKit library (app + tests)
     CalendarHomeView.swift  Connected 30-day meeting list
     CalendarEventDetailView.swift  Event popup: details, links, create/record
     DeletedNoteView.swift  Trash preview with restore/delete
-    SharedViews.swift    FloatingChrome, banners, BackToWelcomeToolbar, TrailingToolbarItem, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
+    SharedViews.swift    FloatingChrome, PillPopoverCard, PillCapsule, PillSegmentedControl, banners, BackToWelcomeToolbar, TrailingToolbarItem, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
   Branding.swift         DosaMark PNGs + drawn menu-bar frames + DosaWatermark
 Sources/DosaCalendarChecks/  Calendar checks runnable without XCTest
 Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
@@ -361,7 +361,7 @@ Full-document restyle on every change (cheap at note scale). Per line: headings 
   **Surfaces that do not inherit it, and cannot be restyled** — SwiftUI's `.font()` environment value only reaches views SwiftUI itself draws:
   - **NSMenu-drawn surfaces** — contextual menus, the editor's ⋯ menu and the sidebar's ＋ menu, `QuickSettingsPanel`'s model menu, `MenuBarExtra`, and `.commands` (`DosaApp.swift`, `RecordingCommand.swift`).
   - **NSAlert** — `.alert` and `.confirmationDialog`: both their message text and their buttons.
-  - **NSPopUpButton / NSSegmentedControl** — a `Picker`'s displayed value and its menu items, and segmented pickers (My Notes/Dosa Notes, the LLM provider tabs). Only the Form row *label* beside a `Picker` is SwiftUI-drawn and gets fonted.
+  - **NSPopUpButton / NSSegmentedControl** — a `Picker`'s displayed value and its menu items, and segmented pickers that are still AppKit-drawn (the LLM provider tabs). Only the Form row *label* beside a `Picker` is SwiftUI-drawn and gets fonted. The editor header's My Notes / Dosa Notes switcher used to live here; it is `PillSegmentedControl` now, the same pill idiom as `EditorPill`, with the selected segment filled in `Theme.current.accentColor` / `onAccentColor`.
   - `.help()` tooltips, `NSOpenPanel` / `NSSavePanel`, notification banners, the window title and toolbar control metrics, and the OAuth HTML page. The note-date control used to be `DatePicker(.graphical)` on this list — it is an `NSDatePicker` underneath and paints its selection with `NSColor.controlAccentColor`, so `.tint()` cannot follow the Dosa theme. The editor header now draws `ThemedCalendarView` instead, an app-drawn month grid that uses `Theme.current.accentColor` / `onAccentColor`.
   - SF Symbol `.font(.system(size:))` calls stay on the system face so symbols keep rendering.
 

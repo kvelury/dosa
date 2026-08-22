@@ -689,6 +689,28 @@ extension View {
     }
 }
 
+/// The capsule chrome the editor-header chips share — `EditorPill`'s own capsule and the
+/// view-mode switcher's outer track. Companion to `PillPopoverCard`, which is the same
+/// palette applied to the popups those chips open.
+struct PillCapsule: ViewModifier {
+    /// Accent wash over the fill, for hover. 0.10 is the established pill hover tint.
+    var highlight: Double = 0
+
+    func body(content: Content) -> some View {
+        content
+            .background(Capsule().fill(Theme.current.cardFillColor))
+            .overlay(Capsule().strokeBorder(.quaternary))
+            .overlay(Capsule().fill(Theme.current.accentColor.opacity(highlight)))
+            .contentShape(Capsule())
+    }
+}
+
+extension View {
+    func pillCapsule(highlight: Double = 0) -> some View {
+        modifier(PillCapsule(highlight: highlight))
+    }
+}
+
 /// A themed capsule chip matching the homepage meeting cards' fill and hairline
 /// border. Pass `action` to make it clickable with a hover cue; pass `info` to
 /// reveal a themed card below it on hover; pass `isPanelPresented` for a
@@ -772,10 +794,7 @@ struct EditorPill<PillLabel: View, Panel: View>: View {
             .appFont(size: 13)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(Capsule().fill(Theme.current.cardFillColor))
-            .overlay(Capsule().strokeBorder(.quaternary))
-            .overlay(Capsule().fill(Theme.current.accentColor.opacity(isHovering ? 0.10 : 0)))
-            .contentShape(Capsule())
+            .pillCapsule(highlight: isHovering ? 0.10 : 0)
     }
 }
 
@@ -800,6 +819,64 @@ extension EditorPill {
         self.isPanelPresented = isPanelPresented
         self.label = label()
         self.panel = panel()
+    }
+}
+
+/// The header's view-mode switcher, in the same idiom as `EditorPill`: one themed capsule
+/// track holding a segment per case, the selected one filled with the theme accent. Replaces
+/// `.pickerStyle(.segmented)`, which is AppKit-drawn and paints with the macOS system accent
+/// no matter which Dosa theme is selected — the same reason `ThemedCalendarView` exists.
+struct PillSegmentedControl<Value: Hashable>: View {
+    let options: [Value]
+    let title: (Value) -> String
+    @Binding var selection: Value
+
+    @State private var hovered: Value?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(options, id: \.self) { option in
+                segment(option)
+            }
+        }
+        .padding(3)
+        .pillCapsule()
+        .fixedSize()
+        .animation(.easeOut(duration: 0.12), value: selection)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Note view")
+    }
+
+    private func segment(_ option: Value) -> some View {
+        let isSelected = selection == option
+        let isHovered = hovered == option
+        return Button {
+            selection = option
+        } label: {
+            Text(title(option))
+                .appFont(size: 13)
+                .foregroundStyle(isSelected ? Theme.current.onAccentColor : Color.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity)
+                .background {
+                    if isSelected {
+                        Capsule().fill(Theme.current.accentColor)
+                    } else if isHovered {
+                        Capsule().fill(Theme.current.accentColor.opacity(0.10))
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            hovered = hovering ? option : nil
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

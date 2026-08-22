@@ -210,15 +210,11 @@ struct NoteEditorView: View {
                 }
                 Spacer()
                 if current.enhancedMarkdown != nil {
-                    Picker("", selection: $viewMode) {
-                        ForEach(ViewMode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .accessibilityLabel("Note view")
-                    .frame(width: 210)
+                    PillSegmentedControl(
+                        options: ViewMode.allCases,
+                        title: { $0.rawValue },
+                        selection: $viewMode
+                    )
                 }
             }
         }
