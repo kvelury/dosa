@@ -41,8 +41,8 @@ struct NoteEditorView: View {
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
     @State private var editorHighlight: TextHighlight?
     @State private var transcriptHighlight: TextHighlight?
-    @State private var showDatePicker = false
-    @State private var showMeeting = false
+    private enum HeaderPanel { case date, meeting, recording }
+    @State private var openPanel: HeaderPanel?
 
     private var isImporting: Bool {
         appState.importingNoteIds.contains(noteId)
@@ -158,31 +158,48 @@ struct NoteEditorView: View {
                 .textFieldStyle(.plain)
                 .appFont(.noteTitle)
             HStack(spacing: 8) {
-                EditorPill(action: { showDatePicker = true }) {
+                EditorPill(isPanelPresented: panelBinding(.date)) {
                     Text(current.createdAt.formatted(date: .long, time: .omitted))
-                }
-                .popover(isPresented: $showDatePicker) {
-                    DatePicker("", selection: note.createdAt, displayedComponents: .date)
-                        .datePickerStyle(.graphical)
-                        .labelsHidden()
+                } panel: {
+                    ThemedCalendarView(selection: note.createdAt)
+                        .accessibilityElement(children: .contain)
                         .accessibilityLabel("Note date")
-                        .padding(12)
-                        .frame(width: 260)
                 }
                 if let event = meeting(for: current) {
-                    EditorPill(action: { showMeeting = true }) {
+                    EditorPill(isPanelPresented: panelBinding(.meeting)) {
                         Image(systemName: "calendar")
+                    } panel: {
+                        CalendarEventDetailView(event: event, style: .compact)
                     }
                     .help(event.displayTitle)
                     .accessibilityLabel(event.displayTitle)
-                    .popover(isPresented: $showMeeting) {
-                        CalendarEventDetailView(event: event, style: .compact)
-                    }
                 }
                 if let duration = current.recordingDuration {
-                    EditorPill {
+                    EditorPill(isPanelPresented: panelBinding(.recording)) {
                         Label(TimeFormatting.clock(duration), systemImage: "waveform")
+                    } panel: {
+                        RecordingActionsPanel(
+                            canPlay: store.recordingURL(for: current) != nil,
+                            isPlaying: player.playingNoteId == noteId && player.isPlaying,
+                            hasTranscript: current.transcript != nil,
+                            onPlay: {
+                                openPanel = nil
+                                if let url = store.recordingURL(for: current) {
+                                    if player.playingNoteId == noteId {
+                                        player.togglePlayPause()
+                                    } else {
+                                        player.play(url: url, noteId: noteId)
+                                    }
+                                }
+                            },
+                            onViewTranscript: {
+                                openPanel = nil
+                                showTranscript = true
+                            }
+                        )
                     }
+                    .help("Recording actions")
+                    .accessibilityLabel("Recording, \(TimeFormatting.spoken(duration))")
                 }
                 if current.enhancedMarkdown != nil {
                     EditorPill(info: generationInfo(for: current)) {
@@ -193,15 +210,11 @@ struct NoteEditorView: View {
                 }
                 Spacer()
                 if current.enhancedMarkdown != nil {
-                    Picker("", selection: $viewMode) {
-                        ForEach(ViewMode.allCases, id: \.self) { mode in
-                            Text(mode.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .accessibilityLabel("Note view")
-                    .frame(width: 210)
+                    PillSegmentedControl(
+                        options: ViewMode.allCases,
+                        title: { $0.rawValue },
+                        selection: $viewMode
+                    )
                 }
             }
         }
@@ -209,6 +222,13 @@ struct NoteEditorView: View {
         .padding(.top, 16)
         .padding(.bottom, 10)
         .zIndex(1)
+    }
+
+    private func panelBinding(_ panel: HeaderPanel) -> Binding<Bool> {
+        Binding(
+            get: { openPanel == panel },
+            set: { openPanel = $0 ? panel : nil }
+        )
     }
 
     /// Resolves the meeting a note is linked to: the live calendar first, so an
@@ -888,6 +908,39 @@ struct NoteEditorView: View {
         } catch {
             localError = error.localizedDescription
         }
+    }
+}
+
+/// Play / Pause and View Transcript for the recording-duration header pill.
+/// Transport matches the floating bar's `recordButton` so there is one playback path.
+private struct RecordingActionsPanel: View {
+    let canPlay: Bool
+    let isPlaying: Bool
+    let hasTranscript: Bool
+    let onPlay: () -> Void
+    let onViewTranscript: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if canPlay {
+                Button(action: onPlay) {
+                    Label(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
+            Button(action: onViewTranscript) {
+                Label("View Transcript", systemImage: "text.bubble")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasTranscript)
+            .help(hasTranscript
+                  ? "View the full speaker-labeled transcript"
+                  : "The transcript appears after you generate notes")
+        }
+        .appFont(size: 13)
+        .frame(minWidth: 160)
     }
 }
 
