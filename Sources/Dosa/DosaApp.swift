@@ -148,6 +148,7 @@ public struct DosaApp: App {
                 .environmentObject(recorder)
                 .environmentObject(generator)
                 .environmentObject(notifier)
+                .environmentObject(updater)
         } label: {
             Image(nsImage: MenuBarIcon.current(
                 recording: recorder.isRecording,

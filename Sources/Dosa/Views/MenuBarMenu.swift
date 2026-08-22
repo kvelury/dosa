@@ -7,6 +7,7 @@ struct MenuBarMenu: View {
     @EnvironmentObject private var recorder: AudioRecorder
     @EnvironmentObject private var generator: GenerationManager
     @EnvironmentObject private var notifier: NotificationManager
+    @EnvironmentObject private var updater: UpdateManager
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -38,6 +39,9 @@ struct MenuBarMenu: View {
         Button("Settings…") {
             openSettings()
         }
+        Button("Check for Updates…") {
+            checkForUpdates()
+        }
         Divider()
         Button("Quit Dosa") {
             QuitGuard.requestQuit(
@@ -66,6 +70,11 @@ struct MenuBarMenu: View {
     private func openSettings() {
         appState.showSettings = true
         showMainWindow()
+    }
+
+    private func checkForUpdates() {
+        openSettings()
+        updater.check()
     }
 
     /// Brings the main window forward, creating it if the user has closed it.

@@ -81,7 +81,7 @@ Sources/Dosa/            DosaKit library (app + tests)
     TranscriptView.swift Transcript sheet (read-only MarkdownTextEditor)
     SearchViews.swift    Global search sheet, in-note popover, filter chips
     SettingsView.swift   All settings sections + export/import
-    MenuBarMenu.swift    Windowless new/import/record/settings/quit actions
+    MenuBarMenu.swift    Windowless new/import/record/settings/update-check/quit actions
     QuickSettingsPanel.swift  Model + Notes Style panel inside the recording bar's pull-tab
     WelcomeView.swift    Greeting, stats, shortcut hints; HomeView router
     CalendarHomeView.swift  Connected 30-day meeting list
