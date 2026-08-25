@@ -920,20 +920,27 @@ private struct RecordingActionsPanel: View {
     let onPlay: () -> Void
     let onViewTranscript: () -> Void
 
+    private enum Row { case play, transcript }
+    @State private var hovered: Row?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if canPlay {
-                Button(action: onPlay) {
-                    Label(isPlaying ? "Pause" : "Play", systemImage: isPlaying ? "pause.fill" : "play.fill")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
+                row(
+                    .play,
+                    title: isPlaying ? "Pause" : "Play",
+                    systemImage: isPlaying ? "pause.fill" : "play.fill",
+                    enabled: true,
+                    action: onPlay
+                )
             }
-            Button(action: onViewTranscript) {
-                Label("View Transcript", systemImage: "text.bubble")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
+            row(
+                .transcript,
+                title: "View Transcript",
+                systemImage: "text.bubble",
+                enabled: hasTranscript,
+                action: onViewTranscript
+            )
             .disabled(!hasTranscript)
             .help(hasTranscript
                   ? "View the full speaker-labeled transcript"
@@ -941,6 +948,33 @@ private struct RecordingActionsPanel: View {
         }
         .appFont(size: 13)
         .frame(minWidth: 160)
+    }
+
+    private func row(
+        _ kind: Row,
+        title: String,
+        systemImage: String,
+        enabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        let isHovered = hovered == kind
+        return Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Theme.current.accentColor.opacity(isHovered ? 0.10 : 0))
+                )
+        }
+        .buttonStyle(.plain)
+        .hoverLift(isHovered)
+        // A disabled row must not tint or lift — it would read as clickable.
+        .onHover { hovering in
+            guard enabled else { return }
+            hovered = hovering ? kind : nil
+        }
     }
 }
 
