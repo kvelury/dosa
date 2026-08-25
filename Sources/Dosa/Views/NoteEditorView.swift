@@ -158,7 +158,7 @@ struct NoteEditorView: View {
                 .textFieldStyle(.plain)
                 .appFont(.noteTitle)
             HStack(spacing: 8) {
-                EditorPill(isPanelPresented: panelBinding(.date), hoverLift: true) {
+                EditorPill(isPanelPresented: panelBinding(.date)) {
                     Text(current.createdAt.formatted(date: .long, time: .omitted))
                 } panel: {
                     ThemedCalendarView(selection: note.createdAt)

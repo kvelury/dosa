@@ -738,7 +738,6 @@ struct EditorPill<PillLabel: View, Panel: View>: View {
     var action: (() -> Void)?
     var info: String?
     var isPanelPresented: Binding<Bool>?
-    var hoverLift: Bool = false
     @ViewBuilder var label: PillLabel
     @ViewBuilder var panel: Panel
 
@@ -816,7 +815,6 @@ struct EditorPill<PillLabel: View, Panel: View>: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .pillCapsule(highlight: isHovering ? 0.10 : 0)
-            .hoverLift(hoverLift && isHovering && !isPanelOpen)
     }
 }
 
@@ -833,14 +831,12 @@ extension EditorPill where Panel == EmptyView {
 extension EditorPill {
     init(
         isPanelPresented: Binding<Bool>,
-        hoverLift: Bool = false,
         @ViewBuilder label: () -> PillLabel,
         @ViewBuilder panel: () -> Panel
     ) {
         self.action = nil
         self.info = nil
         self.isPanelPresented = isPanelPresented
-        self.hoverLift = hoverLift
         self.label = label()
         self.panel = panel()
     }
@@ -1013,6 +1009,7 @@ private struct PanelMarker: NSViewRepresentable {
 struct ThemedCalendarView: View {
     @Binding var selection: Date
     @State private var visibleMonth: Date
+    @State private var hoveredDay: Date?
 
     private let calendar = Calendar.current
     private let cellSize: CGFloat = 30
@@ -1091,6 +1088,7 @@ struct ThemedCalendarView: View {
     private func dayCell(_ day: Date) -> some View {
         let isSelected = calendar.isDate(day, inSameDayAs: selection)
         let isToday = calendar.isDateInToday(day)
+        let isHovered = hoveredDay == day
         return Button {
             select(day)
         } label: {
@@ -1099,14 +1097,30 @@ struct ThemedCalendarView: View {
                 .foregroundStyle(isSelected ? Theme.current.onAccentColor : Color.primary)
                 .frame(width: cellSize, height: cellSize)
                 .background {
+                    // The hover wash is not just a cue: `hoverLift`'s shadow needs a
+                    // filled shape to cast from, and on the bare number it would trace
+                    // the glyph. The today ring draws over whichever fill is showing.
                     if isSelected {
                         Circle().fill(Theme.current.accentColor)
-                    } else if isToday {
+                    } else if isHovered {
+                        Circle().fill(Theme.current.accentColor.opacity(0.10))
+                    }
+                    if isToday && !isSelected {
                         Circle().strokeBorder(Theme.current.accentColor)
                     }
                 }
         }
         .buttonStyle(.plain)
+        .hoverLift(isHovered)
+        .onHover { hovering in
+            // Clear only our own day: moving fast between cells can land the old
+            // cell's exit after the new cell's enter, which would blank the wash.
+            if hovering {
+                hoveredDay = day
+            } else if hoveredDay == day {
+                hoveredDay = nil
+            }
+        }
         .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
