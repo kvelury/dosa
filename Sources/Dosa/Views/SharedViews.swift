@@ -711,6 +711,25 @@ extension View {
     }
 }
 
+/// Accent-tinted lift for a hovered target. Applies to a *filled* shape only — on bare
+/// text the shadow traces the glyphs instead of the target, so give the content a
+/// background before reaching for this.
+struct HoverLift: ViewModifier {
+    var isActive: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .shadow(color: isActive ? Theme.current.hoverShadowColor : .clear,
+                    radius: isActive ? 8 : 0,
+                    y: isActive ? 2 : 0)
+            .animation(.easeOut(duration: 0.12), value: isActive)
+    }
+}
+
+extension View {
+    func hoverLift(_ isActive: Bool) -> some View { modifier(HoverLift(isActive: isActive)) }
+}
+
 /// A themed capsule chip matching the homepage meeting cards' fill and hairline
 /// border. Pass `action` to make it clickable with a hover cue; pass `info` to
 /// reveal a themed card below it on hover; pass `isPanelPresented` for a
@@ -719,10 +738,12 @@ struct EditorPill<PillLabel: View, Panel: View>: View {
     var action: (() -> Void)?
     var info: String?
     var isPanelPresented: Binding<Bool>?
+    var hoverLift: Bool = false
     @ViewBuilder var label: PillLabel
     @ViewBuilder var panel: Panel
 
     @State private var isHovering = false
+    @State private var regions = PanelRegions()
     @FocusState private var panelFocused: Bool
 
     private var tracksHover: Bool { action != nil || info != nil || isPanelPresented != nil }
@@ -756,13 +777,13 @@ struct EditorPill<PillLabel: View, Panel: View>: View {
                     .offset(y: 34)
             } else if let isPanelPresented, isPanelPresented.wrappedValue {
                 panel
-                    .background(PanelMarker())
                     .pillPopoverCard(horizontal: 12, vertical: 10)
                     .onExitCommand { isPanelPresented.wrappedValue = false }
                     .focused($panelFocused)
-                    .background(ClickOutsideCatcher { isPanelPresented.wrappedValue = false })
                     .transition(.opacity)
                     .offset(y: 34)
+                    .background(PanelMarker(regions: regions))
+                    .background(ClickOutsideCatcher(regions: regions) { isPanelPresented.wrappedValue = false })
                     .onAppear { panelFocused = true }
             }
         }
@@ -773,7 +794,7 @@ struct EditorPill<PillLabel: View, Panel: View>: View {
         .animation(.easeOut(duration: 0.12), value: isPanelOpen)
         .background {
             if isPanelPresented != nil {
-                PanelMarker()
+                PanelMarker(regions: regions)
             }
         }
         .applyIf(tracksHover) { view in
@@ -795,6 +816,7 @@ struct EditorPill<PillLabel: View, Panel: View>: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .pillCapsule(highlight: isHovering ? 0.10 : 0)
+            .hoverLift(hoverLift && isHovering && !isPanelOpen)
     }
 }
 
@@ -811,12 +833,14 @@ extension EditorPill where Panel == EmptyView {
 extension EditorPill {
     init(
         isPanelPresented: Binding<Bool>,
+        hoverLift: Bool = false,
         @ViewBuilder label: () -> PillLabel,
         @ViewBuilder panel: () -> Panel
     ) {
         self.action = nil
         self.info = nil
         self.isPanelPresented = isPanelPresented
+        self.hoverLift = hoverLift
         self.label = label()
         self.panel = panel()
     }
@@ -882,22 +906,28 @@ struct PillSegmentedControl<Value: Hashable>: View {
 
 /// Closes an in-hierarchy popup when a click lands anywhere outside it. Needed because
 /// `EditorPill`'s panels are overlays, not popovers, so nothing dismisses them for free.
-/// Same mechanism as `SidebarDeselectCatcher`: a zero-size NSView installing a local
-/// left-mouse-down monitor, walking the hit-test chain from the clicked view upward.
+/// Window-coordinate containment against registered `PanelMarkerView`s, not a hit-test
+/// walk: SwiftUI on macOS gives most controls no backing NSView, so walking the AppKit
+/// chain silently reports every in-panel click as outside. The rect is read at click
+/// time because the calendar panel changes height with the visible month's row count.
 struct ClickOutsideCatcher: NSViewRepresentable {
+    let regions: PanelRegions
     let onOutsideClick: () -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = MonitorView()
+        view.regions = regions
         view.onOutsideClick = onOutsideClick
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? MonitorView)?.regions = regions
         (nsView as? MonitorView)?.onOutsideClick = onOutsideClick
     }
 
     final class MonitorView: NSView {
+        var regions: PanelRegions?
         var onOutsideClick: (() -> Void)?
         private var monitor: Any?
 
@@ -925,24 +955,8 @@ struct ClickOutsideCatcher: NSViewRepresentable {
         }
 
         private func handle(_ event: NSEvent) {
-            guard let window, event.window === window, let content = window.contentView else { return }
-            var view = content.hitTest(event.locationInWindow)
-            var inside = false
-            while let current = view {
-                if current is PanelMarkerView {
-                    inside = true
-                    break
-                }
-                // `.background(PanelMarker())` is a sibling of the SwiftUI content,
-                // not an ancestor. Treat a marker sitting on this container as inside
-                // so the pill and its overlay share one "inside" region.
-                if current.subviews.contains(where: { $0 is PanelMarkerView }) {
-                    inside = true
-                    break
-                }
-                view = current.superview
-            }
-            if !inside {
+            guard let window, event.window === window, let regions else { return }
+            if !regions.contains(event.locationInWindow) {
                 DispatchQueue.main.async { [weak self] in
                     self?.onOutsideClick?()
                 }
@@ -951,18 +965,46 @@ struct ClickOutsideCatcher: NSViewRepresentable {
     }
 }
 
-/// Marker the walk looks for. A click inside the panel hits a descendant of this view,
-/// so the walk finds it and the panel stays open.
+/// Click-through marker whose window-space rect is the "inside" region for
+/// `ClickOutsideCatcher`. `hitTest` returns nil so the marker never swallows
+/// clicks meant for the panel content sitting in front of it.
 final class PanelMarkerView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// The marker's own rect in window (bottom-left) coordinates — the same space
+    /// as `NSEvent.locationInWindow`. Read fresh on each click: the calendar panel
+    /// changes height as the visible month's row count changes.
+    var windowRect: NSRect? {
+        guard window != nil, !isHidden else { return nil }
+        return convert(bounds, to: nil)
+    }
+}
+
+/// The window-space regions one `EditorPill` treats as "inside" for dismissal:
+/// its own capsule and its open panel. Weak so a dismissed panel's marker drops out
+/// without anyone having to unregister it.
+final class PanelRegions {
+    private let views = NSHashTable<PanelMarkerView>.weakObjects()
+
+    func register(_ view: PanelMarkerView) { views.add(view) }
+
+    func contains(_ point: NSPoint) -> Bool {
+        views.allObjects.contains { ($0.windowRect ?? .zero).contains(point) }
+    }
 }
 
 private struct PanelMarker: NSViewRepresentable {
+    let regions: PanelRegions
+
     func makeNSView(context: Context) -> PanelMarkerView {
-        PanelMarkerView()
+        let view = PanelMarkerView()
+        regions.register(view)
+        return view
     }
 
-    func updateNSView(_ nsView: PanelMarkerView, context: Context) {}
+    func updateNSView(_ nsView: PanelMarkerView, context: Context) {
+        regions.register(nsView)
+    }
 }
 
 /// App-drawn month grid so the selected-day fill and today ring follow

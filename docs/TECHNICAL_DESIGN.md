@@ -87,7 +87,7 @@ Sources/Dosa/            DosaKit library (app + tests)
     CalendarHomeView.swift  Connected 30-day meeting list
     CalendarEventDetailView.swift  Event popup: details, links, create/record
     DeletedNoteView.swift  Trash preview with restore/delete
-    SharedViews.swift    FloatingChrome, PillPopoverCard, PillCapsule, PillSegmentedControl, banners, BackToWelcomeToolbar, TrailingToolbarItem, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
+    SharedViews.swift    FloatingChrome, PillPopoverCard, PillCapsule, HoverLift, PillSegmentedControl, EditorPill, ClickOutsideCatcher, ThemedCalendarView, banners, BackToWelcomeToolbar, TrailingToolbarItem, BarPedestalShape, NotesStyleSlider, RecordingWaveformView, ErrorDialogView, MultiSelectionView
   Branding.swift         DosaMark PNGs + drawn menu-bar frames + DosaWatermark
 Sources/DosaCalendarChecks/  Calendar checks runnable without XCTest
 Resources/Info.plist    Bundle metadata + NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
@@ -548,6 +548,10 @@ They get there differently, and the difference is load-bearing. The ⋯ reads `T
 `FloatingChrome` is for overlays *over content* only; using it on a toolbar item is glass-on-glass, the same rule as "buttons inside the recording bar stay `.bordered`".
 
 The editor header's pills are a different chrome. Date, meeting, recording, and sparkle popups share `PillPopoverCard` — an opaque `cardFillColor` card, radius 8, `.quaternary` hairline, no material, no shadow, no arrow. They sit directly over editor text, where a translucent backdrop makes contrast unmeasurable (the same reason `FloatingChrome` swaps to `cardFillColor` under Reduce Transparency). Do not unify the two.
+
+The card is still shadowless. `HoverLift` is a shadow on *interactive targets*, not on the popup surface. The two shadows have different jobs: `FloatingChrome`'s neutral `.black.opacity(0.15), radius 10, y 3` (`SharedViews.swift:205`) models a panel floating over content; `ThemePalette.hoverShadowColor`'s accent tint at radius 8, y 2 models a target lifting under the pointer. Not to be unified — same spirit as the existing "do not unify the two [chromes]" rule. `EditorPill.hoverLift` defaults to `false` and only the date pill passes `true`: that flag is a staging mechanism for theming the whole app on this popup/hover idiom, not a permanent per-pill preference. `HoverLift` needs a filled shape underneath — on bare text the shadow traces glyphs, which is why `RecordingActionsPanel`'s rows gained a 10%-accent rounded-rect background.
+
+> **CALLOUT — never decide inside/outside by walking the AppKit hit-test chain in a SwiftUI hierarchy.** SwiftUI on macOS gives most views no backing `NSView`, so `hitTest` resolves to a shared hosting view that is an *ancestor* of any marker view, and a superview walk silently reports "outside" for every click on an in-panel control — which is exactly how the date popup shipped closing on every day tap and every month chevron. Window-coordinate containment against the marker's own `convert(bounds, to: nil)` is the mechanism that works, and the rect must be read at click time because the calendar's height changes with the visible month's row count. `SidebarDeselectCatcher` still walks for an `NSTableView` and is a different case: it is looking for an AppKit view that genuinely exists.
 
 Spacers do two different jobs here, and both are load-bearing:
 
