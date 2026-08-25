@@ -1010,6 +1010,7 @@ struct ThemedCalendarView: View {
     @Binding var selection: Date
     @State private var visibleMonth: Date
     @State private var hoveredDay: Date?
+    @State private var hoveredMonthStep: Int?
 
     private let calendar = Calendar.current
     private let cellSize: CGFloat = 30
@@ -1035,29 +1036,43 @@ struct ThemedCalendarView: View {
 
     private var header: some View {
         HStack {
-            Button {
-                shiftMonth(-1)
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Previous month")
-
+            monthButton(-1, systemImage: "chevron.left", label: "Previous month")
             Spacer()
-
             Text(monthTitle)
                 .appFont(size: 13)
-
             Spacer()
-
-            Button {
-                shiftMonth(1)
-            } label: {
-                Image(systemName: "chevron.right")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Next month")
+            monthButton(1, systemImage: "chevron.right", label: "Next month")
         }
+    }
+
+    /// The same circular target a day cell gets. Sized deliberately: the bare chevron
+    /// glyph was only a few points wide, so the month arrows were far harder to hit than
+    /// the days they sit above. The hover wash doubles as the shape `hoverLift` casts
+    /// from, and `contentShape` makes the whole circle clickable, not just the glyph.
+    private func monthButton(_ delta: Int, systemImage: String, label: String) -> some View {
+        let isHovered = hoveredMonthStep == delta
+        return Button {
+            shiftMonth(delta)
+        } label: {
+            Image(systemName: systemImage)
+                .frame(width: cellSize, height: cellSize)
+                .background {
+                    if isHovered {
+                        Circle().fill(Theme.current.accentColor.opacity(0.10))
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .hoverLift(isHovered)
+        .onHover { hovering in
+            if hovering {
+                hoveredMonthStep = delta
+            } else if hoveredMonthStep == delta {
+                hoveredMonthStep = nil
+            }
+        }
+        .accessibilityLabel(label)
     }
 
     private var weekdayStrip: some View {
