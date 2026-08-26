@@ -41,8 +41,8 @@ struct NoteEditorView: View {
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
     @State private var editorHighlight: TextHighlight?
     @State private var transcriptHighlight: TextHighlight?
-    private enum HeaderPanel { case date, meeting, recording }
-    @State private var openPanel: HeaderPanel?
+    @State private var showDatePicker = false
+    @State private var showMeeting = false
 
     private var isImporting: Bool {
         appState.importingNoteIds.contains(noteId)
@@ -158,48 +158,27 @@ struct NoteEditorView: View {
                 .textFieldStyle(.plain)
                 .appFont(.noteTitle)
             HStack(spacing: 8) {
-                EditorPill(isPanelPresented: panelBinding(.date)) {
+                EditorPill(action: { showDatePicker = true }) {
                     Text(current.createdAt.formatted(date: .long, time: .omitted))
-                } panel: {
-                    ThemedCalendarView(selection: note.createdAt)
-                        .accessibilityElement(children: .contain)
-                        .accessibilityLabel("Note date")
+                }
+                .popover(isPresented: $showDatePicker) {
+                    ScaledDatePicker(selection: note.createdAt)
+                        .padding(12)
                 }
                 if let event = meeting(for: current) {
-                    EditorPill(isPanelPresented: panelBinding(.meeting)) {
+                    EditorPill(action: { showMeeting = true }) {
                         Image(systemName: "calendar")
-                    } panel: {
-                        CalendarEventDetailView(event: event, style: .compact)
                     }
                     .help(event.displayTitle)
                     .accessibilityLabel(event.displayTitle)
+                    .popover(isPresented: $showMeeting) {
+                        CalendarEventDetailView(event: event, style: .compact)
+                    }
                 }
                 if let duration = current.recordingDuration {
-                    EditorPill(isPanelPresented: panelBinding(.recording)) {
+                    EditorPill {
                         Label(TimeFormatting.clock(duration), systemImage: "waveform")
-                    } panel: {
-                        RecordingActionsPanel(
-                            canPlay: store.recordingURL(for: current) != nil,
-                            isPlaying: player.playingNoteId == noteId && player.isPlaying,
-                            hasTranscript: current.transcript != nil,
-                            onPlay: {
-                                openPanel = nil
-                                if let url = store.recordingURL(for: current) {
-                                    if player.playingNoteId == noteId {
-                                        player.togglePlayPause()
-                                    } else {
-                                        player.play(url: url, noteId: noteId)
-                                    }
-                                }
-                            },
-                            onViewTranscript: {
-                                openPanel = nil
-                                showTranscript = true
-                            }
-                        )
                     }
-                    .help("Recording actions")
-                    .accessibilityLabel("Recording, \(TimeFormatting.spoken(duration))")
                 }
                 if current.enhancedMarkdown != nil {
                     EditorPill(info: generationInfo(for: current)) {
@@ -210,11 +189,15 @@ struct NoteEditorView: View {
                 }
                 Spacer()
                 if current.enhancedMarkdown != nil {
-                    PillSegmentedControl(
-                        options: ViewMode.allCases,
-                        title: { $0.rawValue },
-                        selection: $viewMode
-                    )
+                    Picker("", selection: $viewMode) {
+                        ForEach(ViewMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityLabel("Note view")
+                    .frame(width: 210)
                 }
             }
         }
@@ -222,13 +205,6 @@ struct NoteEditorView: View {
         .padding(.top, 16)
         .padding(.bottom, 10)
         .zIndex(1)
-    }
-
-    private func panelBinding(_ panel: HeaderPanel) -> Binding<Bool> {
-        Binding(
-            get: { openPanel == panel },
-            set: { openPanel = $0 ? panel : nil }
-        )
     }
 
     /// Resolves the meeting a note is linked to: the live calendar first, so an
@@ -911,70 +887,99 @@ struct NoteEditorView: View {
     }
 }
 
-/// Play / Pause and View Transcript for the recording-duration header pill.
-/// Transport matches the floating bar's `recordButton` so there is one playback path.
-private struct RecordingActionsPanel: View {
-    let canPlay: Bool
-    let isPlaying: Bool
-    let hasTranscript: Bool
-    let onPlay: () -> Void
-    let onViewTranscript: () -> Void
+/// `NSDatePicker`'s month grid with its chrome turned off.
+///
+/// `DatePicker(.graphical)` hosts this same control but exposes no way to reach
+/// it, and inside a popover it arrives focused — so AppKit draws its accent-colored
+/// focus ring around the calendar, plus a bezel under it. Neither belongs on a
+/// surface that already has the popover's own border. `focusRingType = .none`
+/// drops the ring without making the control unfocusable, so keyboard and
+/// VoiceOver navigation still work; the bezel and background come off so the
+/// popover's material shows through instead of a second card.
+private struct BorderlessCalendarPicker: NSViewRepresentable {
+    @Binding var selection: Date
 
-    private enum Row { case play, transcript }
-    @State private var hovered: Row?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if canPlay {
-                row(
-                    .play,
-                    title: isPlaying ? "Pause" : "Play",
-                    systemImage: isPlaying ? "pause.fill" : "play.fill",
-                    enabled: true,
-                    action: onPlay
-                )
-            }
-            row(
-                .transcript,
-                title: "View Transcript",
-                systemImage: "text.bubble",
-                enabled: hasTranscript,
-                action: onViewTranscript
-            )
-            .disabled(!hasTranscript)
-            .help(hasTranscript
-                  ? "View the full speaker-labeled transcript"
-                  : "The transcript appears after you generate notes")
-        }
-        .appFont(size: 13)
-        .frame(minWidth: 160)
+    func makeNSView(context: Context) -> NSDatePicker {
+        let picker = NSDatePicker()
+        picker.datePickerStyle = .clockAndCalendar
+        picker.datePickerElements = [.yearMonthDay]
+        picker.datePickerMode = .single
+        picker.isBezeled = false
+        picker.isBordered = false
+        picker.drawsBackground = false
+        picker.focusRingType = .none
+        picker.dateValue = selection
+        picker.target = context.coordinator
+        picker.action = #selector(Coordinator.dateChanged(_:))
+        return picker
     }
 
-    private func row(
-        _ kind: Row,
-        title: String,
-        systemImage: String,
-        enabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        let isHovered = hovered == kind
-        return Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Theme.current.accentColor.opacity(isHovered ? 0.10 : 0))
-                )
+    func updateNSView(_ nsView: NSDatePicker, context: Context) {
+        context.coordinator.selection = $selection
+        // Only write back on a real change: assigning `dateValue` unconditionally
+        // fights the user mid-interaction.
+        if nsView.dateValue != selection {
+            nsView.dateValue = selection
         }
-        .buttonStyle(.plain)
-        .hoverLift(isHovered)
-        // A disabled row must not tint or lift — it would read as clickable.
-        .onHover { hovering in
-            guard enabled else { return }
-            hovered = hovering ? kind : nil
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    final class Coordinator: NSObject {
+        var selection: Binding<Date>
+
+        init(selection: Binding<Date>) {
+            self.selection = selection
         }
+
+        /// `NSDatePicker` carries the whole date, so the note's time of day
+        /// survives a day tap — `createdAt` orders the sidebar, and zeroing the
+        /// time here would silently reshuffle the note list.
+        @objc func dateChanged(_ sender: NSDatePicker) {
+            selection.wrappedValue = sender.dateValue
+        }
+    }
+}
+
+/// The note-date calendar, drawn larger than `NSDatePicker`'s natural size.
+///
+/// `DatePicker(.graphical)` is an `NSDatePicker` underneath, so SwiftUI's font
+/// environment does not reach it (§8) — there is no "make the calendar bigger"
+/// knob, and the `.frame(width:)` this replaced only padded empty space around a
+/// ~139pt-wide control. `scaleEffect` is the one mechanism that actually enlarges
+/// it; on Retina the layer still rasterizes at 2× backing, so 1.3× resolves at
+/// ~1.5× and stays crisp.
+///
+/// `scaleEffect` does not change measured size, so the natural size is read once
+/// and multiplied back into a frame — otherwise the popover would size itself to
+/// the unscaled control and clip.
+private struct ScaledDatePicker: View {
+    @Binding var selection: Date
+    var scale: CGFloat = 1.3
+
+    @State private var natural: CGSize = .zero
+
+    var body: some View {
+        BorderlessCalendarPicker(selection: $selection)
+            .fixedSize()
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { natural = proxy.size }
+                        .onChange(of: proxy.size) { _, size in natural = size }
+                }
+            )
+            .scaleEffect(scale, anchor: .topLeading)
+            // Unconstrained until the first measurement lands, so the control is
+            // never squeezed into a zero frame on the layout pass before it.
+            .frame(
+                width: natural.width > 0 ? natural.width * scale : nil,
+                height: natural.height > 0 ? natural.height * scale : nil,
+                alignment: .topLeading
+            )
+            .accessibilityLabel("Note date")
     }
 }
 
