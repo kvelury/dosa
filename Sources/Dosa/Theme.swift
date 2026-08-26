@@ -45,12 +45,6 @@ struct ThemePalette {
     }
     var onAccentColor: Color { Color(nsColor: onAccent) }
 
-    /// Hover lift for interactive chrome. Accent-tinted rather than neutral so the cue
-    /// reads as part of the theme. `FloatingChrome`'s black shadow is a different job:
-    /// that one models a panel floating over content, this one models a target lifting
-    /// under the pointer. Do not unify them.
-    var hoverShadowColor: Color { accentColor.opacity(0.28) }
-
     /// Status colors, contrast-adjusted against `cardFill` the same way as `accentText`.
     var dangerText: NSColor {
         Theme.derived { [cardFill] in NSColor.systemRed.ensuringContrast(Theme.aaTextRatio, against: cardFill) }
