@@ -56,25 +56,27 @@ final class GoogleCalendarAuth {
 
     private var loopbackServer: LoopbackHTTPServer?
 
-    /// The configured client's ID. Read constantly — SwiftUI re-evaluates it on
-    /// every render of the Settings section — so it deliberately lives in
-    /// UserDefaults, not the keychain. Under ad-hoc signing every keychain read
-    /// is a fresh "allow access" prompt, because each rebuild changes the code
-    /// signature the item's ACL was bound to.
-    static var clientID: String? {
-        _ = didMigrateClientID
-        let value = UserDefaults.standard.string(forKey: AppSettings.googleCalendarClientIDKey)?
+    /// A stored string, or nil when it is absent or blank. Blank matters: the
+    /// paste sheet can leave an empty string behind, and an empty client ID has
+    /// to read as "no client configured" rather than as a configured empty one.
+    private static func stored(_ key: String) -> String? {
+        let value = UserDefaults.standard.string(forKey: key)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return (value?.isEmpty == false) ? value : nil
     }
 
-    /// The full client, secret included. Touches the keychain, so it is called
-    /// only on the two token-exchange paths — never from a view.
+    /// The configured client's ID. Read constantly — SwiftUI re-evaluates it on
+    /// every render of the Settings section.
+    static var clientID: String? {
+        stored(AppSettings.googleCalendarClientIDKey)
+    }
+
+    /// The full client, secret included.
     static var credentials: Credentials? {
         guard let clientID else { return nil }
         return Credentials(
             clientID: clientID,
-            clientSecret: GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.clientSecretAccount)
+            clientSecret: stored(AppSettings.googleCalendarClientSecretKey)
         )
     }
 
@@ -82,20 +84,16 @@ final class GoogleCalendarAuth {
         Self.clientID != nil
     }
 
-    /// Earlier builds keychained the client ID too. Move it across so the prompt
-    /// storm stops without the client having to be re-added. `static let` gives
-    /// once-per-process; the defaults flag makes it once ever, so a fresh install
-    /// that never had a keychained ID does not pay a prompt on every launch to
-    /// discover that.
-    private static let didMigrateClientID: Void = {
+    /// Wipes the session but deliberately leaves the client credentials alone:
+    /// disconnecting an account should not un-configure the OAuth client.
+    private static func clearTokens() {
         let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: AppSettings.googleCalendarClientIDMigratedKey) else { return }
-        defaults.set(true, forKey: AppSettings.googleCalendarClientIDMigratedKey)
-        guard let keychained = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.clientIDAccount)
-        else { return }
-        defaults.set(keychained, forKey: AppSettings.googleCalendarClientIDKey)
-        GoogleCalendarKeychain.delete(account: GoogleCalendarKeychain.clientIDAccount)
-    }()
+        for key in [AppSettings.googleCalendarAccessTokenKey,
+                    AppSettings.googleCalendarRefreshTokenKey,
+                    AppSettings.googleCalendarExpiryKey] {
+            defaults.removeObject(forKey: key)
+        }
+    }
 
     // MARK: - Configuring the client
 
@@ -130,33 +128,35 @@ final class GoogleCalendarAuth {
     /// different client are invalid, and keeping them would surface later as an
     /// opaque invalid_grant on the next refresh.
     static func saveCredentials(_ credentials: Credentials) {
-        UserDefaults.standard.set(credentials.clientID, forKey: AppSettings.googleCalendarClientIDKey)
+        let defaults = UserDefaults.standard
+        defaults.set(credentials.clientID, forKey: AppSettings.googleCalendarClientIDKey)
         if let secret = credentials.clientSecret {
-            GoogleCalendarKeychain.set(secret, account: GoogleCalendarKeychain.clientSecretAccount)
+            defaults.set(secret, forKey: AppSettings.googleCalendarClientSecretKey)
         } else {
-            GoogleCalendarKeychain.delete(account: GoogleCalendarKeychain.clientSecretAccount)
+            defaults.removeObject(forKey: AppSettings.googleCalendarClientSecretKey)
         }
-        GoogleCalendarKeychain.clearTokens()
+        clearTokens()
     }
 
     /// Leaves Calendar unconfigured until another client is supplied.
     static func clearCredentials() {
-        UserDefaults.standard.removeObject(forKey: AppSettings.googleCalendarClientIDKey)
-        GoogleCalendarKeychain.clearClientCredentials()
-        GoogleCalendarKeychain.clearTokens()
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: AppSettings.googleCalendarClientIDKey)
+        defaults.removeObject(forKey: AppSettings.googleCalendarClientSecretKey)
+        clearTokens()
     }
 
     var isConnected: Bool {
-        GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.accessTokenAccount) != nil
-            || GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.refreshTokenAccount) != nil
+        Self.stored(AppSettings.googleCalendarAccessTokenKey) != nil
+            || Self.stored(AppSettings.googleCalendarRefreshTokenKey) != nil
     }
 
     func clear() {
-        if let token = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.accessTokenAccount)
-            ?? GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.refreshTokenAccount) {
+        if let token = Self.stored(AppSettings.googleCalendarAccessTokenKey)
+            ?? Self.stored(AppSettings.googleCalendarRefreshTokenKey) {
             Task { await Self.revoke(token: token) }
         }
-        GoogleCalendarKeychain.clearTokens()
+        Self.clearTokens()
     }
 
     func cancelAuthorization() {
@@ -226,7 +226,7 @@ final class GoogleCalendarAuth {
     }
 
     func validAccessToken() async throws -> String {
-        guard let token = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.accessTokenAccount) else {
+        guard let token = Self.stored(AppSettings.googleCalendarAccessTokenKey) else {
             throw AuthError.notConnected
         }
         let expiry = expiryDate()
@@ -238,7 +238,7 @@ final class GoogleCalendarAuth {
 
     @discardableResult
     func refreshAccessToken() async throws -> String {
-        guard let refreshToken = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.refreshTokenAccount),
+        guard let refreshToken = Self.stored(AppSettings.googleCalendarRefreshTokenKey),
               let credentials = Self.credentials else {
             throw AuthError.notConnected
         }
@@ -258,26 +258,29 @@ final class GoogleCalendarAuth {
         return token
     }
 
+    /// `object(forKey:)` rather than `double(forKey:)`: the latter turns an absent
+    /// value into 0, which would read as an expiry in 1970 and force a refresh on
+    /// every call. A missing expiry has to stay nil — `OAuthTokenTiming` treats
+    /// that as "not known to be expired".
     private func expiryDate() -> Date? {
-        guard let raw = GoogleCalendarKeychain.string(account: GoogleCalendarKeychain.expiryAccount),
-              let interval = TimeInterval(raw) else { return nil }
+        guard let interval = UserDefaults.standard.object(forKey: AppSettings.googleCalendarExpiryKey) as? Double
+        else { return nil }
         return Date(timeIntervalSince1970: interval)
     }
 
     private func store(tokenResponse: [String: Any], preservingRefreshToken: String? = nil) {
+        let defaults = UserDefaults.standard
         if let accessToken = tokenResponse["access_token"] as? String {
-            GoogleCalendarKeychain.set(accessToken, account: GoogleCalendarKeychain.accessTokenAccount)
+            defaults.set(accessToken, forKey: AppSettings.googleCalendarAccessTokenKey)
         }
         if let refreshToken = tokenResponse["refresh_token"] as? String {
-            GoogleCalendarKeychain.set(refreshToken, account: GoogleCalendarKeychain.refreshTokenAccount)
+            defaults.set(refreshToken, forKey: AppSettings.googleCalendarRefreshTokenKey)
         } else if let preservingRefreshToken {
-            GoogleCalendarKeychain.set(preservingRefreshToken, account: GoogleCalendarKeychain.refreshTokenAccount)
+            defaults.set(preservingRefreshToken, forKey: AppSettings.googleCalendarRefreshTokenKey)
         }
         if let expiresIn = tokenResponse["expires_in"] as? NSNumber {
-            GoogleCalendarKeychain.set(
-                String(Date().timeIntervalSince1970 + expiresIn.doubleValue),
-                account: GoogleCalendarKeychain.expiryAccount
-            )
+            defaults.set(Date().timeIntervalSince1970 + expiresIn.doubleValue,
+                         forKey: AppSettings.googleCalendarExpiryKey)
         }
     }
 

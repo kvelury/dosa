@@ -39,7 +39,7 @@ open build/Dosa.app
 
 Google Calendar sign-in needs a Desktop OAuth client, which you supply **in the app** — nothing is baked into the build, and no credentials live in this repo. Create a Desktop app client in the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), then in Dosa go to Settings → Google Calendar → **Choose client_secret.json…** (or **Paste JSON…**) and hand it the file the console downloads. The nested `{"installed": {…}}` shape it gives you works as-is.
 
-The client is stored in the login Keychain, so it is set once per machine and survives rebuilds, new worktrees, and updates replacing the app bundle. The section's **Remove** link clears it. Builds without a client still run — Settings just says Calendar is unavailable.
+The client is stored in the app's `UserDefaults`, so it is set once per machine and survives rebuilds, new worktrees, and updates replacing the app bundle. The section's **Remove** link clears it. Builds without a client still run — Settings just says Calendar is unavailable.
 
 This is deliberately the only path: GitHub Releases are public, so a `client_secret` embedded in a published build would be a published secret.
 
@@ -88,7 +88,14 @@ Automatic checks on launch are on by default and stay silent unless an update ex
 - In-progress captures: `Recordings/<note-id>-<timestamp>-{mic,system}.caf`, deleted once the recording is safely mixed down. Anything left there is an interrupted session, recovered automatically on next launch.
 - Settings and API keys: app `UserDefaults` (never in this repo)
 - Notion tokens: app `UserDefaults`
-- Google Calendar tokens: macOS Keychain (`com.dosa.meetingnotes.google-calendar`)
+- Google Calendar client and tokens: app `UserDefaults`
+
+Nothing goes in the Keychain. It used to hold the Calendar tokens, but Dosa is ad-hoc signed, and a keychain item's ACL is bound to the code signature that created it — which changes on every `./build.sh`. "Always Allow" was void by the next build, so each launch reopened the access prompts. First launch after the change clears the old items out; if you want to check by hand:
+
+```
+security find-generic-password -s com.dosa.meetingnotes.google-calendar   # should find nothing
+security delete-generic-password -s com.dosa.meetingnotes.google-calendar # if it does
+```
 
 ## Architecture
 
@@ -110,7 +117,7 @@ Sources/Dosa/                        DosaKit library
   UpdateManager                      GitHub Releases check, download, install helper
   DiffEngine / SearchService         word diff, search + reveal machinery
   Notion/                            OAuth (DCR+PKCE), minimal MCP client, export logic
-  GoogleCalendar/                    OAuth+Keychain, Calendar REST, hourly sync, homepage
+  GoogleCalendar/                    Desktop OAuth, Calendar REST, hourly sync, homepage
   Views/                             SwiftUI + AppKit-backed markdown editor
     MenuBarMenu.swift                windowless new/import/record/settings/quit actions
   Branding.swift                     in-app mark + animated template menu-bar icons
