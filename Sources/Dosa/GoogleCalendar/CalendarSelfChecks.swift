@@ -296,20 +296,58 @@ public enum CalendarSelfChecks {
             "the .example placeholder should be rejected"
         )
 
-        // Dosa is ad-hoc signed, so a keychain read can cost an access prompt.
-        // `clientID` and `hasCredentials` are read on every render of the Settings
-        // section; if either reaches the keychain the user gets a prompt storm.
-        // Keep them on UserDefaults.
+        // Credentials live in UserDefaults, never the keychain: Dosa is ad-hoc
+        // signed, so every rebuild changed the code signature an item's ACL was
+        // bound to and macOS re-prompted — and `clientID` is read on every render
+        // of the Settings section. Round-trip the whole client through the real
+        // accessors to keep it that way.
+        //
+        // saveCredentials/clearCredentials also tear down the session, so every
+        // calendar key is captured and put back — a self-check must not sign the
+        // user out if this ever runs anywhere but the checks binary.
         let defaults = UserDefaults.standard
-        let savedClientID = defaults.string(forKey: AppSettings.googleCalendarClientIDKey)
+        let calendarKeys = [
+            AppSettings.googleCalendarClientIDKey,
+            AppSettings.googleCalendarClientSecretKey,
+            AppSettings.googleCalendarAccessTokenKey,
+            AppSettings.googleCalendarRefreshTokenKey,
+            AppSettings.googleCalendarExpiryKey,
+        ]
+        let saved = calendarKeys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in saved {
+                if let value {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
+
         defaults.set("render-path-probe.apps.googleusercontent.com", forKey: AppSettings.googleCalendarClientIDKey)
         expect(GoogleCalendarAuth.clientID == "render-path-probe.apps.googleusercontent.com",
                "clientID should read straight from UserDefaults")
         defaults.removeObject(forKey: AppSettings.googleCalendarClientIDKey)
         expect(GoogleCalendarAuth.clientID == nil, "clearing the default clears the client ID")
-        if let savedClientID {
-            defaults.set(savedClientID, forKey: AppSettings.googleCalendarClientIDKey)
-        }
+
+        GoogleCalendarAuth.saveCredentials(
+            .init(clientID: "round-trip.apps.googleusercontent.com", clientSecret: "s3cret")
+        )
+        expect(GoogleCalendarAuth.credentials?.clientID == "round-trip.apps.googleusercontent.com",
+               "saved client ID should come back out")
+        expect(GoogleCalendarAuth.credentials?.clientSecret == "s3cret",
+               "saved client secret should come back out of UserDefaults")
+
+        // A client without a secret has to clear any secret left by the previous
+        // one, or the new client would be paired with a stale credential.
+        GoogleCalendarAuth.saveCredentials(
+            .init(clientID: "round-trip.apps.googleusercontent.com", clientSecret: nil)
+        )
+        expect(GoogleCalendarAuth.credentials?.clientSecret == nil,
+               "saving a client without a secret clears the stored one")
+
+        GoogleCalendarAuth.clearCredentials()
+        expect(GoogleCalendarAuth.credentials == nil, "clearCredentials leaves no client behind")
 
         return failures
     }

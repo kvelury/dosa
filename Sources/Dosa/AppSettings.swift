@@ -56,11 +56,16 @@ enum AppSettings {
     static let notionTitlePropertyKey = "notionTitleProperty"
     static let notionDatabaseURLKey = "notionDatabaseURL"
 
-    // The OAuth client ID is not a secret — it is visible in the consent URL — so
-    // it stays out of the keychain, where every read costs an access prompt under
-    // ad-hoc signing. Only the client secret is keychained.
+    // Calendar credentials live here rather than in the keychain, alongside the
+    // Notion tokens above and the provider API keys below. Dosa is ad-hoc signed,
+    // so every rebuild changed the code signature a keychain item's ACL was bound
+    // to and macOS re-prompted for access — see GoogleCalendarKeychainPurge.
     static let googleCalendarClientIDKey = "googleCalendarClientID"
-    static let googleCalendarClientIDMigratedKey = "googleCalendarClientIDMigrated"
+    static let googleCalendarClientSecretKey = "googleCalendarClientSecret"
+    static let googleCalendarAccessTokenKey = "googleCalendarAccessToken"
+    static let googleCalendarRefreshTokenKey = "googleCalendarRefreshToken"
+    static let googleCalendarExpiryKey = "googleCalendarTokenExpiry"
+    static let googleCalendarKeychainPurgedKey = "googleCalendarKeychainPurged"
     static let googleCalendarAccountKey = "googleCalendarAccountEmail"
     static let googleCalendarSelectedIDsKey = "googleCalendarSelectedCalendarIDs"
     static let googleCalendarOnboardingFinishedKey = "googleCalendarOnboardingFinished"

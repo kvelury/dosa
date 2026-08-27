@@ -56,6 +56,9 @@ final class GoogleCalendarManager: ObservableObject {
     }
 
     init() {
+        // Before anything reads a credential, so an install upgrading from the
+        // keychain-backed build does not leave items orphaned there.
+        GoogleCalendarKeychainPurge.runOnce()
         if !auth.hasCredentials {
             connectionState = .unavailable
         } else if auth.isConnected {
@@ -170,8 +173,8 @@ final class GoogleCalendarManager: ObservableObject {
 
     // MARK: - OAuth client
 
-    /// Deliberately not `credentials?.clientID` — this is read on every render of
-    /// the Settings section, and `credentials` reaches into the keychain.
+    /// The ID alone: the Settings footer shows it, and nothing on a render path
+    /// has any use for the secret that `credentials` also carries.
     var activeClientID: String? { GoogleCalendarAuth.clientID }
 
     func setCredentials(from url: URL) {
