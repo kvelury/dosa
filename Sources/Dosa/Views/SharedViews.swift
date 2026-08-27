@@ -682,6 +682,7 @@ struct EditorPill<PillLabel: View>: View {
             if let action {
                 Button(action: action) { content }
                     .buttonStyle(.plain)
+                    .cursor(.pointingHand)
             } else {
                 content
             }
@@ -705,12 +706,6 @@ struct EditorPill<PillLabel: View>: View {
         .applyIf(tracksHover) { view in
             view.onHover { hovering in
                 isHovering = hovering
-                guard action != nil else { return }
-                if hovering {
-                    NSCursor.pointingHand.push()
-                } else {
-                    NSCursor.pop()
-                }
             }
         }
     }

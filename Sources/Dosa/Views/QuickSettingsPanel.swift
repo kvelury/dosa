@@ -55,13 +55,13 @@ struct QuickSettingsPanel: View {
     private var activeModel: String { storedModel(for: activeProvider) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             modelRow
             notesStyleRow
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 14)
-        .padding(.bottom, 6)
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
         .appFontScope()
     }
 
@@ -69,7 +69,7 @@ struct QuickSettingsPanel: View {
     private var modelRow: some View {
         HStack(spacing: 10) {
             Text("Model")
-                .appFont(size: 12, weight: .medium)
+                .appFont(size: 13, weight: .medium)
                 .foregroundStyle(Theme.secondaryTextColor)
             Spacer(minLength: 8)
             if configuredProviders.isEmpty {
@@ -77,7 +77,7 @@ struct QuickSettingsPanel: View {
                 // whose backdrop is unpredictable — `secondaryText`, not
                 // `tertiaryText`, is the floor for legible text here.
                 Text("No LLM configured")
-                    .appFont(size: 12)
+                    .appFont(size: 13)
                     .foregroundStyle(Theme.secondaryTextColor)
             } else {
                 modelMenu
@@ -110,22 +110,23 @@ struct QuickSettingsPanel: View {
             // so the whole chip opens the menu, not just the glyph.
             HStack(spacing: 5) {
                 Text(activeModel)
-                    .appFont(size: 12, weight: .medium)
+                    .appFont(size: 13, weight: .medium)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 8, height: 8)
+                    .frame(width: 9, height: 9)
                     .fontWeight(.regular)
             }
             .foregroundStyle(.primary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .contentShape(Capsule())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
+        .cursor(.pointingHand)
         .fixedSize()
         .background(Capsule().fill(.quaternary.opacity(0.4)))
         .help("Model used to generate notes. Picking one also makes its provider the default.")
@@ -136,7 +137,7 @@ struct QuickSettingsPanel: View {
     private var notesStyleRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Notes Style: \(AppSettings.verbosityLevelNames[min(max(verbosity, 0), 4)])")
-                .appFont(size: 12, weight: .medium)
+                .appFont(size: 13, weight: .medium)
                 .foregroundStyle(Theme.secondaryTextColor)
             NotesStyleSlider(level: $verbosity)
                 .controlSize(.small)

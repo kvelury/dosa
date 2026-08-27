@@ -106,6 +106,103 @@ final class PaddedTextView: NSTextView {
         syncWithClipView()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            TextCursorCarveOutRegistry.shared.registerTextView(self)
+        }
+    }
+
+    // MARK: - Cursor
+
+    /// Claims the I-beam everywhere in `visibleRect` except the rects that
+    /// floating surfaces (the recording bar, its quick-settings panel, the
+    /// toasts) have registered via `.textCursorCarveOut()`. An `NSTextView`
+    /// re-asserts its cursor rects from here on every layout pass, which is why
+    /// nothing drawn merely *above* it in the view hierarchy can win the
+    /// pointer — subtracting the claim is the only fix that sticks.
+    ///
+    /// The carve-out is each surface's bounding rect, not its exact silhouette
+    /// (e.g. the pedestal's concave corners beside the pull-tab) — a sliver of
+    /// text can show arrow instead of I-beam there. Clicks still reach the text
+    /// view; only the pointer glyph is imprecise, and that's an accepted trade
+    /// for not tracking per-shape geometry.
+    override func resetCursorRects() {
+        guard let window else {
+            super.resetCursorRects()
+            return
+        }
+        let holes = TextCursorCarveOutRegistry.shared.carveOuts(in: window)
+            .map { convert($0, from: nil) }
+            .filter { $0.intersects(visibleRect) }
+        guard !holes.isEmpty else {
+            addCursorRect(visibleRect, cursor: .iBeam)
+            return
+        }
+        for rect in Self.subtracting(holes, from: visibleRect) {
+            addCursorRect(rect, cursor: .iBeam)
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard shouldYieldCursor() else {
+            super.mouseMoved(with: event)
+            return
+        }
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        guard shouldYieldCursor() else {
+            super.cursorUpdate(with: event)
+            return
+        }
+    }
+
+    /// True when the text view must not touch the cursor at all: the pointer is
+    /// over a registered carve-out, or this window isn't actually the frontmost
+    /// thing under the pointer — a popover (the calendar, note search) is a
+    /// separate child window, and this view's cursor rects and mouse-moved
+    /// tracking keep firing underneath it unless told otherwise.
+    private func shouldYieldCursor() -> Bool {
+        guard let window else { return false }
+        let screenPoint = NSEvent.mouseLocation
+        if TextCursorCarveOutRegistry.shared.contains(screenPoint: screenPoint) {
+            return true
+        }
+        let topWindowNumber = NSWindow.windowNumber(at: screenPoint, belowWindowWithWindowNumber: 0)
+        return topWindowNumber != window.windowNumber
+    }
+
+    /// Subtracts each rect in `holes` from `rect`, splitting into the
+    /// surviving axis-aligned pieces. A handful of small holes is the only
+    /// case this needs to handle well.
+    private static func subtracting(_ holes: [NSRect], from rect: NSRect) -> [NSRect] {
+        var pieces = [rect]
+        for hole in holes {
+            pieces = pieces.flatMap { subtracting(hole, from: $0) }
+        }
+        return pieces.filter { $0.width > 0 && $0.height > 0 }
+    }
+
+    private static func subtracting(_ hole: NSRect, from piece: NSRect) -> [NSRect] {
+        guard hole.intersects(piece) else { return [piece] }
+        let overlap = hole.intersection(piece)
+        var result: [NSRect] = []
+        if overlap.minY > piece.minY {
+            result.append(NSRect(x: piece.minX, y: piece.minY, width: piece.width, height: overlap.minY - piece.minY))
+        }
+        if overlap.maxY < piece.maxY {
+            result.append(NSRect(x: piece.minX, y: overlap.maxY, width: piece.width, height: piece.maxY - overlap.maxY))
+        }
+        if overlap.minX > piece.minX {
+            result.append(NSRect(x: piece.minX, y: overlap.minY, width: overlap.minX - piece.minX, height: overlap.height))
+        }
+        if overlap.maxX < piece.maxX {
+            result.append(NSRect(x: overlap.maxX, y: overlap.minY, width: piece.maxX - overlap.maxX, height: overlap.height))
+        }
+        return result
+    }
+
     deinit {
         if let observer = clipObserver {
             NotificationCenter.default.removeObserver(observer)
