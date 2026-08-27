@@ -556,17 +556,36 @@ Do not reach for `.padding` or `.offset` to reposition a toolbar item — SwiftU
 
 > **CALLOUT — never write `if #available` inside a `@ToolbarContentBuilder` closure while the deployment target is below macOS 14.5.** `ToolbarContentBuilder.buildLimitedAvailability` has two overloads; the usable one is `@available(macOS 14.5, *)`, and `Package.swift` targets 14.0, so the compiler silently selects the other — `obsoleted: 14.5`, message "this code may crash on earlier versions of the OS" — whose body performs no type erasure at all. Hoist the check up to the `ViewBuilder` level instead (`ViewBuilder`'s equivalent is unconstrained), which is why `BackToWelcomeToolbar` is a `ViewModifier` that applies two whole different `.toolbar { }` blocks rather than one block with a branch inside. A `buildLimitedAvailability` deprecation warning in the build output means this slipped back in; hoist it, never silence it.
 
-> **KNOWN, UNFIXED — the pointer shows an I-beam over the recording bar and both toasts.** They sit
-> above `PaddedTextView`, and an `NSTextView` claims the I-beam across its whole visible area. (The
-> ⋯ menu no longer has this: as a toolbar item it is not over the text view at all.) Clicks
-> work; the pointer just reads as a text caret over the floating surfaces. Three layered-on-top fixes
-> were tried and all three lost, because the text view re-asserts its claim from inside its own
-> `resetCursorRects`: an arrow cursor rect on a view above it, an `.inVisibleRect`/`.cursorUpdate`
-> tracking area above it, and `pointerStyle(.default)` (macOS 15+). A subtractive fix — markers
-> registering the overlay frames, `PaddedTextView` carving them out of the rect it claims — was
-> built and reverted as more machinery than the cosmetic problem warranted. Don't retry the three
-> layered approaches. `.onHover` + `NSCursor.push()/pop()` is also a dead end: one dropped hover
-> leaves the cursor stack unbalanced and the pointer stuck.
+> **FIXED — the pointer used to show an I-beam over the recording bar, its quick-settings panel, both
+> toasts, and the calendar popover.** They sit above `PaddedTextView`, and an `NSTextView` claims the
+> I-beam across its whole visible area from its own `resetCursorRects`, re-asserting the claim on
+> every layout pass — nothing merely drawn *above* it in the view hierarchy can win the pointer.
+> Three such layered fixes were tried and all lost for that reason: an arrow cursor rect on a view
+> above it, an `.inVisibleRect`/`.cursorUpdate` tracking area above it, and `pointerStyle(.default)`
+> (macOS 15+). `.onHover` + `NSCursor.push()/pop()` is also a dead end — one dropped hover leaves the
+> cursor stack unbalanced and the pointer stuck. Don't retry any of the four.
+>
+> The fix is **subtractive**, in `CursorSurfaces.swift`. Any floating surface drawn over the editor
+> applies `.textCursorCarveOut()`, which registers its screen-space frame with
+> `TextCursorCarveOutRegistry` (and paints its own default arrow cursor rect). `PaddedTextView`
+> overrides `resetCursorRects()` to subtract every registered carve-out from `visibleRect` before
+> claiming the remainder as `.iBeam`, and overrides `mouseMoved`/`cursorUpdate` to no-op when the
+> pointer sits inside a carve-out, since `NSTextView` also sets the cursor from those paths (e.g. for
+> links). Per-control pointing-hand cursors go through `.cursor(_:)`, an `NSView` overlay whose
+> `resetCursorRects()` adds one plain rect — no push/pop, nothing to unbalance. `EditorPill`
+> (`SharedViews.swift`) uses this instead of the old push/pop pattern.
+>
+> The calendar and note-search popovers needed a different guard: their content lives in a *child*
+> window, and the main window's cursor rects and mouse-tracking keep firing underneath it regardless.
+> `shouldYieldCursor()` in `PaddedTextView` also checks `NSWindow.windowNumber(at:belowWindowWithWindowNumber:)`
+> and yields whenever this window isn't actually the frontmost thing under the pointer — the popover's
+> own window then controls its cursor with zero registration needed (arrow over the `NSDatePicker`
+> grid; I-beam only in a real text field).
+>
+> The carve-out is each surface's bounding rect, not its exact silhouette, so a sliver of text beside
+> the pull-tab's concave corners can show arrow instead of I-beam — clicks still reach the text view
+> there, only the glyph is imprecise. **Any new overlay drawn over the editor must add
+> `.textCursorCarveOut()` or it will silently regress into this bug.**
 
 ---
 
@@ -574,13 +593,13 @@ Do not reach for `.padding` or `.offset` to reposition a toolbar item — SwiftU
 
 The two settings that get touched most — which model writes the notes, and how detailed they are —
 are reachable from the floating bar without opening Settings. A pull-tab sits centered on the bar's
-top edge; clicking it slides out a 300 pt panel holding a Model menu and the Notes Style slider.
+top edge; clicking it slides out a 320 pt panel holding a Model menu and the Notes Style slider.
 Because `floatingBar(current:)` is one view for every bar state, the tab looks and behaves the same
 idle, recording, and playing back.
 
 **The panel is not a second surface — it is part of the bar's silhouette.** `BarPedestalShape`
 (`SharedViews.swift`) is an `InsettableShape` drawing a wide plinth with a narrower box centered on
-top, joined by concave fillets: collapsed the box is a 52×18 half-oval tab, open it is the panel.
+top, joined by concave fillets: collapsed the box is a 60×20 half-oval tab, open it is the panel.
 `topWidth`/`topHeight` are its `animatableData`, so the tab *morphs* into the panel in one spring
 rather than a card fading in above the bar.
 
@@ -601,11 +620,12 @@ Load-bearing details:
 - `chunkingProgressStrip` hangs off the bar's *content*, not the whole container. On the container
   it would pin itself to the top of the tab, floating above the bar it reports on.
 - `topWidth` is clamped so both shoulders keep a straight run of bar top edge to flare onto
-  (`width - 2*(barCornerRadius + jointRadius)`); the narrowest real bar is ~430 pt against a 300 pt
+  (`width - 2*(barCornerRadius + jointRadius)`); the narrowest real bar is ~430 pt against a 320 pt
   panel, so this only matters in degenerate layouts. `topHeight <= 0` degrades to a plain rounded
   rect — the bar exactly as it was before the tab existed.
-- `MarkdownTextEditor`'s `bottomContentInset` went 74 → 88 for the tab's permanent 18 pt. The open
-  panel is transient and reserves nothing.
+- `MarkdownTextEditor`'s `bottomContentInset` went 74 → 88 → 102 as the bar scaled up to match the
+  global search icon's 16 pt glyph (`NoteEditorView.barBottomInset`, derived from the bar's own
+  metrics in a comment there). The open panel is still transient and reserves nothing.
 - `NotesStyleSlider` is shared verbatim with Settings (§11) rather than reimplemented, so the two
   are literally the same control.
 

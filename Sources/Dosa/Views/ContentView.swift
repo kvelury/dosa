@@ -80,6 +80,7 @@ struct ContentView: View {
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
+                .textCursorCarveOut()
                 .padding(.top, 10)
                 .animation(.default, value: awayFromRecording)
             }

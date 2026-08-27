@@ -250,7 +250,7 @@ struct NoteEditorView: View {
                     text: enhancedBinding(note: note),
                     diffAgainst: current.manualText,
                     highlight: editorHighlight,
-                    bottomContentInset: 88,
+                    bottomContentInset: Self.barBottomInset,
                     onMediaFileDrop: { requestAudio(.importFile($0)) },
                     onMediaDragChanged: { isDropTargeted = $0 }
                 )
@@ -275,7 +275,7 @@ struct NoteEditorView: View {
                     text: note.manualText,
                     isEditable: current.enhancedMarkdown == nil,
                     highlight: editorHighlight,
-                    bottomContentInset: 88,
+                    bottomContentInset: Self.barBottomInset,
                     onMediaFileDrop: { requestAudio(.importFile($0)) },
                     onMediaDragChanged: { isDropTargeted = $0 }
                 )
@@ -294,16 +294,25 @@ struct NoteEditorView: View {
 
     // MARK: - Floating bar
 
-    static let tabHeight: CGFloat = 18
-    private static let tabWidth: CGFloat = 52
-    private static let panelWidth: CGFloat = 300
+    static let tabHeight: CGFloat = 20
+    private static let tabWidth: CGFloat = 60
+    private static let panelWidth: CGFloat = 320
+
+    /// Extra scroll space at the bottom of the editor so content clears the
+    /// collapsed bar: record button (38) + 2×12 vertical padding (62) + the
+    /// permanent tab (20) = 82, + the bar's own `.padding(.bottom, 14)` = 96,
+    /// + ~6pt breathing room = 102. The open panel is transient and reserves
+    /// nothing (§9d).
+    static let barBottomInset: CGFloat = 102
 
     /// Computed rather than a `static let` (as the plain rounded rect was),
     /// because the silhouette now tracks the quick-settings panel's state.
     private var barShape: BarPedestalShape {
         BarPedestalShape(
             topWidth: showQuickSettings ? Self.panelWidth : Self.tabWidth,
-            topHeight: topBoxHeight
+            topHeight: topBoxHeight,
+            topCornerRadius: 13,
+            barCornerRadius: 30
         )
     }
 
@@ -331,6 +340,7 @@ struct NoteEditorView: View {
         .onPreferenceChange(BarTopBoxHeightKey.self) { topBoxHeight = $0 }
         .clipShape(barShape)
         .floatingChrome(in: barShape)
+        .textCursorCarveOut()
         .padding(.bottom, 14)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showQuickSettings)
         .animation(.easeInOut(duration: 0.18), value: player.playingNoteId == noteId)
@@ -338,14 +348,14 @@ struct NoteEditorView: View {
     }
 
     private func barContent(current: Note) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             if player.playingNoteId == noteId {
                 scrubBar
             }
             mainBarRow(current: current)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 12)
     }
 
     /// The pull-tab. It sits between the panel and the bar, so the same control
@@ -357,15 +367,16 @@ struct NoteEditorView: View {
             Image(systemName: showQuickSettings ? "chevron.down" : "chevron.up")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 10, height: 10)
+                .frame(width: 12, height: 12)
                 .fontWeight(.medium)
                 .foregroundStyle(Theme.secondaryTextColor)
                 .frame(width: Self.tabWidth, height: Self.tabHeight)
-                // The drawn silhouette (52×18, BarPedestalShape) stays fixed —
+                // The drawn silhouette (60×20, BarPedestalShape) stays fixed —
                 // only the *hit* area grows, to clear the 24pt target guideline.
                 .contentShape(OutsetRectangle(outset: 4))
         }
         .buttonStyle(.plain)
+        .cursor(.pointingHand)
         .help(showQuickSettings ? "Hide quick settings" : "Model and notes style")
         .accessibilityLabel(showQuickSettings ? "Hide quick settings" : "Show quick settings")
     }
@@ -383,7 +394,7 @@ struct NoteEditorView: View {
                 }
             }
             .frame(height: 3)
-            .padding(.horizontal, 26)
+            .padding(.horizontal, 30)
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Transcription progress")
@@ -392,9 +403,9 @@ struct NoteEditorView: View {
     }
 
     private var scrubBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Text(TimeFormatting.clock(player.currentTime))
-                .appFont(.caption, monospacedDigit: true)
+                .appFont(.subheadline, monospacedDigit: true)
                 .foregroundStyle(Theme.secondaryTextColor)
             Slider(
                 value: Binding(
@@ -403,32 +414,34 @@ struct NoteEditorView: View {
                 ),
                 in: 0...max(player.duration, 0.1)
             )
-            .controlSize(.small)
-            .frame(minWidth: 260)
+            .controlSize(.regular)
+            .frame(minWidth: 300)
             .accessibilityLabel("Playback position")
             .accessibilityValue(TimeFormatting.spoken(player.currentTime))
             Text(TimeFormatting.clock(player.duration))
-                .appFont(.caption, monospacedDigit: true)
+                .appFont(.subheadline, monospacedDigit: true)
                 .foregroundStyle(Theme.secondaryTextColor)
             Button {
                 player.stop()
             } label: {
                 Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 15))
                     .foregroundStyle(Theme.secondaryTextColor)
             }
             .buttonStyle(.plain)
+            .cursor(.pointingHand)
             .help("Stop playback")
             .accessibilityLabel("Stop playback")
         }
     }
 
     private func mainBarRow(current: Note) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             recordButton(current: current)
             if isRecordingThisNote {
                 RecordingWaveformView(levels: recorder.levelHistory)
                 Text(TimeFormatting.clock(recorder.elapsed))
-                    .appMonoFont(.body)
+                    .appMonoFont(size: 15)
                     .foregroundStyle(Theme.current.dangerTextColor)
                     .accessibilityLabel("Recording, \(TimeFormatting.spoken(recorder.elapsed))")
             }
@@ -436,11 +449,11 @@ struct NoteEditorView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Importing…")
-                    .appFont(.callout)
+                    .appFont(.body)
                     .foregroundStyle(Theme.secondaryTextColor)
             }
             Divider()
-                .frame(height: 22)
+                .frame(height: 28)
             if generator.activeNoteId == noteId && generator.phase != .idle {
                 Button {
                     generator.cancel()
@@ -452,6 +465,7 @@ struct NoteEditorView: View {
                     .foregroundStyle(Theme.current.dangerTextColor)
                 }
                 .buttonStyle(.bordered)
+                .cursor(.pointingHand)
                 .help("Cancel and discard this run")
             } else {
                 Button(action: generate) {
@@ -460,6 +474,7 @@ struct NoteEditorView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canGenerate(current: current))
+                .cursor(.pointingHand)
                 .help(current.recordingFileName == nil && current.transcript == nil
                       ? "Record a meeting first"
                       : "Transcribe the recording and let Dosa generate structured notes")
@@ -471,6 +486,7 @@ struct NoteEditorView: View {
             }
             .buttonStyle(.bordered)
             .disabled(current.transcript == nil)
+            .cursor(.pointingHand)
             .help(current.transcript == nil
                   ? "The transcript appears after you generate notes"
                   : "View the full speaker-labeled transcript")
@@ -482,18 +498,21 @@ struct NoteEditorView: View {
                 ProgressView()
                     .controlSize(.small)
                 Text("Exporting to Notion…")
-                    .appFont(.callout)
+                    .appFont(.body)
                     .foregroundStyle(Theme.secondaryTextColor)
             }
             if current.transcript != nil || current.enhancedMarkdown != nil {
                 Divider()
-                    .frame(height: 22)
+                    .frame(height: 28)
                 Button {
                     showNoteSearch = true
                 } label: {
                     Image(systemName: "magnifyingglass")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.bordered)
+                .cursor(.pointingHand)
                 .help("Search within this note and its transcript (⌘F)")
                 .accessibilityLabel("Search within note")
                 .popover(isPresented: $showNoteSearch, arrowEdge: .top) {
@@ -503,6 +522,7 @@ struct NoteEditorView: View {
                 }
             }
         }
+        .controlSize(.large)
     }
 
     private func handleReveal(_ reveal: SearchCoordinator.Reveal?) {
@@ -529,12 +549,13 @@ struct NoteEditorView: View {
         if isRecordingThisNote {
             Button(action: stopRecording) {
                 Image(systemName: "stop.fill")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 38, height: 38)
                     .background(Circle().fill(.red))
             }
             .buttonStyle(.plain)
+            .cursor(.pointingHand)
             .help("Stop recording")
             .accessibilityLabel("Stop recording")
         } else if let url = store.recordingURL(for: current) {
@@ -547,23 +568,25 @@ struct NoteEditorView: View {
                 }
             } label: {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(Theme.current.onAccentColor)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 38, height: 38)
                     .background(Circle().fill(Theme.current.accentColor))
             }
             .buttonStyle(.plain)
+            .cursor(.pointingHand)
             .help(isPlaying ? "Pause playback" : "Play the meeting recording")
             .accessibilityLabel(isPlaying ? "Pause playback" : "Play the meeting recording")
         } else {
             Button(action: startRecording) {
                 Image(systemName: "record.circle")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 38, height: 38)
                     .background(Circle().fill(recorder.isRecording ? .gray : .red))
             }
             .buttonStyle(.plain)
+            .cursor(.pointingHand)
             .disabled(recorder.isRecording)
             .help(recorder.isRecording
                   ? "Already recording in another note"
