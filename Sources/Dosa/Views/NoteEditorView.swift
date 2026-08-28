@@ -220,12 +220,12 @@ struct NoteEditorView: View {
             ?? .placeholder(for: note)
     }
 
-    /// "deepseek-v4-flash | detailed" for the sparkle pill's hover card. Nil on
+    /// "deepseek-v4-flash (detailed)" for the sparkle pill's hover card. Nil on
     /// notes generated before the model and style were recorded — the pill still
     /// shows, it just has nothing to explain.
     private func generationInfo(for note: Note) -> String? {
         guard let model = note.generationModel, let style = note.generationStyle else { return nil }
-        return "\(model.lowercased()) | \(style.lowercased())"
+        return "\(model.lowercased()) (\(style.lowercased()))"
     }
 
     @ViewBuilder
