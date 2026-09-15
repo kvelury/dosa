@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CoreMedia
 #if canImport(FoundationModels)
 import Speech
 #endif
@@ -35,6 +36,11 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
     /// Set once when the pipeline fails or can't start; observed for a toast.
     @Published var failureMessage: String?
 
+    /// The tier this session started with. Read at `start` rather than at stop so
+    /// changing the setting mid-recording can't change what happens to the text
+    /// already on screen.
+    private(set) var speed: AppSettings.LiveTranscriptionSpeed = .accurate
+
     // Cross-thread state. `sessionsLock` guards the session references so the
     // recorder's sample queue can hand buffers over without touching the main actor.
     private let sessionsLock = NSLock()
@@ -65,6 +71,7 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
         lastStart = [:]
         nextSeq = 0
         userLabel = userName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "You" : userName
+        speed = AppSettings.liveTranscriptionSpeed
 
         guard AppleTranscriber.advancedAvailable else {
             failureMessage = "Live transcription needs macOS 26 or later."
@@ -73,16 +80,14 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             do {
-                let mic = try await StreamSession.make(speaker: userLabel) { [weak self] update in
+                let tier = speed
+                let mic = try await StreamSession.make(speaker: userLabel, speed: tier) { [weak self] update in
                     self?.apply(update)
                 }
-                let system = try await StreamSession.make(speaker: AppleTranscriber.othersLabel) { [weak self] update in
+                let system = try await StreamSession.make(speaker: AppleTranscriber.othersLabel, speed: tier) { [weak self] update in
                     self?.apply(update)
                 }
-                sessionsLock.lock()
-                micSessionBox = mic
-                systemSessionBox = system
-                sessionsLock.unlock()
+                storeSessions(mic: mic, system: system)
                 isActive = true
             } catch {
                 failureMessage = "Live transcription couldn't start (\(error.localizedDescription)). Recording continues — the transcript will be generated when you stop."
@@ -104,9 +109,7 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
     }
 
     private func ingest(_ buffer: AVAudioPCMBuffer, boxKeyPath: ReferenceWritableKeyPath<LiveTranscriber, Any?>) {
-        sessionsLock.lock()
-        let box = self[keyPath: boxKeyPath]
-        sessionsLock.unlock()
+        let box = withSessionsLock { self[keyPath: boxKeyPath] }
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *), let session = box as? StreamSession {
             session.ingest(buffer)
@@ -114,19 +117,47 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
         #endif
     }
 
+    /// The lock is only ever taken inside these three synchronous helpers: the
+    /// sample queue and the main actor both reach the session references through
+    /// them, and no `await` can land while the lock is held.
+    private func withSessionsLock<T>(_ body: () -> T) -> T {
+        sessionsLock.lock()
+        defer { sessionsLock.unlock() }
+        return body()
+    }
+
+    private func storeSessions(mic: Any?, system: Any?) {
+        withSessionsLock {
+            micSessionBox = mic
+            systemSessionBox = system
+        }
+    }
+
     /// Finalizes both sessions and returns the formatted transcript, or nil when
-    /// live mode wasn't running or produced nothing usable.
+    /// live mode wasn't running, ran in a preview-only tier, or produced nothing
+    /// usable. Returning nil is what routes the note back through the normal
+    /// post-meeting transcription path.
     @MainActor
     func finishIfActive() async -> String? {
         guard isActive else { return nil }
         isActive = false
         defer { clearSessions() }
+        // Fast and Lightweight trade accuracy for latency, so their text is for
+        // watching the meeting, not for keeping. Nothing to finalize or wait on —
+        // dropping the sessions outright also makes stopping quicker.
+        guard speed.liveTranscriptIsFinal else {
+            #if canImport(FoundationModels)
+            if #available(macOS 26.0, *) {
+                let (mic, system) = currentSessions()
+                mic?.cancel()
+                system?.cancel()
+            }
+            #endif
+            return nil
+        }
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
-            sessionsLock.lock()
-            let mic = micSessionBox as? StreamSession
-            let system = systemSessionBox as? StreamSession
-            sessionsLock.unlock()
+            let (mic, system) = currentSessions()
             await mic?.finish()
             await system?.finish()
 
@@ -154,10 +185,7 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
         isActive = false
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
-            sessionsLock.lock()
-            let mic = micSessionBox as? StreamSession
-            let system = systemSessionBox as? StreamSession
-            sessionsLock.unlock()
+            let (mic, system) = currentSessions()
             mic?.cancel()
             system?.cancel()
         }
@@ -166,11 +194,15 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
         lines = []
     }
 
+    #if canImport(FoundationModels)
+    @available(macOS 26.0, *)
+    private func currentSessions() -> (StreamSession?, StreamSession?) {
+        withSessionsLock { (micSessionBox as? StreamSession, systemSessionBox as? StreamSession) }
+    }
+    #endif
+
     private func clearSessions() {
-        sessionsLock.lock()
-        micSessionBox = nil
-        systemSessionBox = nil
-        sessionsLock.unlock()
+        storeSessions(mic: nil, system: nil)
     }
 
     // MARK: - Result handling (main actor)
@@ -205,7 +237,7 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
             // publish re-renders the pane. Dropping intermediates is safe — the
             // next volatile (or the final) supersedes this text anyway.
             let now = Date()
-            guard now.timeIntervalSince(lastVolatilePublish[speaker] ?? .distantPast) > 0.12 else { return }
+            guard now.timeIntervalSince(lastVolatilePublish[speaker] ?? .distantPast) > 0.08 else { return }
             lastVolatilePublish[speaker] = now
             lines[index].text = text
         } else {
@@ -245,9 +277,23 @@ final class LiveTranscriber: ObservableObject, @unchecked Sendable {
 #if canImport(FoundationModels)
 @available(macOS 26.0, *)
 private final class StreamSession: @unchecked Sendable {
+    /// The two module types share no result protocol member for their text, so
+    /// which one is running is kept explicit and branched where it matters.
+    enum Module {
+        case transcriber(SpeechTranscriber)
+        case dictation(DictationTranscriber)
+
+        var speechModule: any SpeechModule {
+            switch self {
+            case .transcriber(let module): return module
+            case .dictation(let module): return module
+            }
+        }
+    }
+
     private let speaker: String
     private let analyzer: SpeechAnalyzer
-    private let transcriber: SpeechTranscriber
+    private let module: Module
     private let continuation: AsyncStream<AnalyzerInput>.Continuation
     private let targetFormat: AVAudioFormat
     private var resultsTask: Task<Void, Never>?
@@ -260,30 +306,57 @@ private final class StreamSession: @unchecked Sendable {
 
     static func make(
         speaker: String,
+        speed: AppSettings.LiveTranscriptionSpeed,
         onUpdate: @escaping @Sendable (LiveTranscriber.Update) -> Void
     ) async throws -> StreamSession {
-        let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) ?? Locale(identifier: "en-US")
-        let transcriber = SpeechTranscriber(
-            locale: locale,
-            transcriptionOptions: [],
-            reportingOptions: [.volatileResults],
-            attributeOptions: [.audioTimeRange]
-        )
-        if let installation = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+        let module: Module
+        switch speed {
+        case .accurate, .fast:
+            let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current)
+                ?? Locale(identifier: "en-US")
+            var reporting: Set<SpeechTranscriber.ReportingOption> = [.volatileResults]
+            if speed == .fast { reporting.insert(.fastResults) }
+            module = .transcriber(SpeechTranscriber(
+                locale: locale,
+                transcriptionOptions: [],
+                reportingOptions: reporting,
+                attributeOptions: [.audioTimeRange]
+            ))
+        case .lightweight:
+            let locale = await DictationTranscriber.supportedLocale(equivalentTo: Locale.current)
+                ?? Locale(identifier: "en-US")
+            module = .dictation(DictationTranscriber(
+                locale: locale,
+                contentHints: [],
+                transcriptionOptions: [.punctuation],
+                reportingOptions: [.volatileResults, .frequentFinalization],
+                attributeOptions: [.audioTimeRange]
+            ))
+        }
+
+        let speechModule = module.speechModule
+        if let installation = try await AssetInventory.assetInstallationRequest(supporting: [speechModule]) {
             try await installation.downloadAndInstall()
         }
-        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [speechModule]) else {
             throw AppleTranscriber.TranscriberError.unavailable("No compatible audio format for live transcription.")
         }
 
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        // `.processLifetime` keeps the speech model resident once loaded, so a
+        // second recording in the same session starts transcribing immediately
+        // instead of paying the load again; `.userInitiated` keeps recognition
+        // ahead of background work while the user is watching the text arrive.
+        let analyzer = SpeechAnalyzer(
+            modules: [speechModule],
+            options: SpeechAnalyzer.Options(priority: .userInitiated, modelRetention: .processLifetime)
+        )
         let (inputSequence, inputBuilder) = AsyncStream<AnalyzerInput>.makeStream()
         try await analyzer.start(inputSequence: inputSequence)
 
         let session = StreamSession(
             speaker: speaker,
             analyzer: analyzer,
-            transcriber: transcriber,
+            module: module,
             continuation: inputBuilder,
             targetFormat: format
         )
@@ -294,29 +367,42 @@ private final class StreamSession: @unchecked Sendable {
     private init(
         speaker: String,
         analyzer: SpeechAnalyzer,
-        transcriber: SpeechTranscriber,
+        module: Module,
         continuation: AsyncStream<AnalyzerInput>.Continuation,
         targetFormat: AVAudioFormat
     ) {
         self.speaker = speaker
         self.analyzer = analyzer
-        self.transcriber = transcriber
+        self.module = module
         self.continuation = continuation
         self.targetFormat = targetFormat
     }
 
     private func consumeResults(onUpdate: @escaping @Sendable (LiveTranscriber.Update) -> Void) {
         let speaker = self.speaker
+        let module = self.module
         resultsTask = Task {
+            func publish(text attributed: AttributedString, isFinal: Bool, range: CMTimeRange) {
+                let text = String(attributed.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return }
+                let start = attributed.runs.compactMap { $0.audioTimeRange?.start.seconds }.first
+                    ?? (range.start.isValid ? range.start.seconds : nil)
+                if isFinal {
+                    onUpdate(.finalText(speaker: speaker, text: text, start: start))
+                } else {
+                    onUpdate(.volatileText(speaker: speaker, text: text, start: start))
+                }
+            }
+
             do {
-                for try await result in transcriber.results {
-                    let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { continue }
-                    let start = result.text.runs.compactMap { $0.audioTimeRange?.start.seconds }.first
-                    if result.isFinal {
-                        onUpdate(.finalText(speaker: speaker, text: text, start: start))
-                    } else {
-                        onUpdate(.volatileText(speaker: speaker, text: text, start: start))
+                switch module {
+                case .transcriber(let transcriber):
+                    for try await result in transcriber.results {
+                        publish(text: result.text, isFinal: result.isFinal, range: result.range)
+                    }
+                case .dictation(let dictation):
+                    for try await result in dictation.results {
+                        publish(text: result.text, isFinal: result.isFinal, range: result.range)
                     }
                 }
             } catch {
@@ -360,9 +446,7 @@ private final class StreamSession: @unchecked Sendable {
     /// Normal stop: drain the input, let the analyzer finalize everything it has,
     /// and wait for the results stream to run dry so every final line has landed.
     func finish() async {
-        lock.lock()
-        stopped = true
-        lock.unlock()
+        markStopped()
         continuation.finish()
         do {
             try await analyzer.finalizeAndFinishThroughEndOfInput()
@@ -375,14 +459,20 @@ private final class StreamSession: @unchecked Sendable {
 
     /// Error/abort path: stop as fast as possible, discarding pending audio.
     func cancel() {
-        lock.lock()
-        stopped = true
-        lock.unlock()
+        markStopped()
         continuation.finish()
         resultsTask?.cancel()
         resultsTask = nil
         let analyzer = self.analyzer
         Task { await analyzer.cancelAndFinishNow() }
+    }
+
+    /// Closes the ingest gate. Synchronous by design: the sample queue reads
+    /// `stopped` under the same lock, and no `await` may hold it.
+    private func markStopped() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
     }
 }
 #endif

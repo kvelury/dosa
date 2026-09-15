@@ -116,25 +116,54 @@ struct LiveTranscriptPane: View {
     }
 
     private func row(_ line: LiveTranscriber.LiveLine) -> some View {
+        TranscriptRowView(
+            speaker: line.speaker,
+            start: line.start,
+            text: line.text,
+            dimmed: !line.isFinal
+        )
+        .accessibilityLabel("\(line.speaker), \(line.text)\(line.isFinal ? "" : ", still transcribing")")
+    }
+}
+
+/// One speaker-labeled transcript line. Shared by the live pane and the Full
+/// Transcript sheet so a finished transcript reads exactly like the one the user
+/// watched arrive.
+struct TranscriptRowView: View {
+    /// Nil for transcripts that carry timestamps but no speaker labels (older
+    /// single-track recordings).
+    let speaker: String?
+    let start: TimeInterval?
+    let text: String
+    /// Volatile live text, rendered lighter until the recognizer commits it.
+    var dimmed = false
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text(line.speaker)
-                    .appFont(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Theme.current.accentColor)
-                Text("[\(AppleTranscriber.mmss(line.start))]")
-                    .appFont(.caption, monospacedDigit: true)
-                    .foregroundStyle(Theme.tertiaryTextColor)
+            if speaker != nil || start != nil {
+                HStack(spacing: 6) {
+                    if let speaker {
+                        Text(speaker)
+                            .appFont(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Theme.current.accentColor)
+                    }
+                    if let start {
+                        Text("[\(AppleTranscriber.mmss(start))]")
+                            .appFont(.caption, monospacedDigit: true)
+                            .foregroundStyle(Theme.tertiaryTextColor)
+                    }
+                }
             }
-            Text(line.text)
+            Text(text)
                 .appFont(.body)
                 .foregroundStyle(.primary)
-                .opacity(line.isFinal ? 1 : 0.55)
+                .opacity(dimmed ? 0.55 : 1)
+                .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(line.speaker), \(line.text)\(line.isFinal ? "" : ", still transcribing")")
     }
 }
 

@@ -19,6 +19,11 @@ import CoreGraphics
 /// deleted until its replacement has been written successfully.
 final class AudioRecorder: NSObject, ObservableObject {
     @Published var isRecording = false
+    /// True from the moment Stop is pressed until the mixed recording is on disk.
+    /// The mixdown takes seconds on a long meeting, and without this the record
+    /// button would spring back to its "start recording" state — clickable —
+    /// while the audio it would overwrite is still being written.
+    @Published private(set) var isFinishing = false
     @Published var elapsed: TimeInterval = 0
     @Published var recordingNoteId: UUID?
     /// Rolling window of recent audio levels (0-1), newest last — drives the
@@ -238,46 +243,55 @@ final class AudioRecorder: NSObject, ObservableObject {
             self.ringTimer = nil
             self.ringPhase = 0
             self.isRecording = false
+            self.isFinishing = true
             self.levelHistory = Self.emptyLevels
         }
 
-        micEngine?.inputNode.removeTap(onBus: 0)
-        micEngine?.stop()
-        micEngine = nil
-        if let stream {
-            try? await stream.stopCapture()
-        }
-        stream = nil
-
-        // Close both files on the sample queue so pending writes flush first.
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            sampleQueue.async {
-                self.micFile = nil
-                self.systemFile = nil
-                continuation.resume()
+        do {
+            micEngine?.inputNode.removeTap(onBus: 0)
+            micEngine?.stop()
+            micEngine = nil
+            if let stream {
+                try? await stream.stopCapture()
             }
+            stream = nil
+
+            // Close both files on the sample queue so pending writes flush first.
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                sampleQueue.async {
+                    self.micFile = nil
+                    self.systemFile = nil
+                    continuation.resume()
+                }
+            }
+
+            let duration = try await Self.mix(
+                inputs: [destination.micScratch, destination.systemScratch],
+                to: destination.output
+            )
+
+            // Best-effort: a failed side track only costs speaker attribution, so
+            // it must never fail the recording itself.
+            _ = try? await Self.mix(inputs: [destination.micScratch], to: destination.micTrack)
+            _ = try? await Self.mix(inputs: [destination.systemScratch], to: destination.systemTrack)
+
+            // Only now that the mix is safely on disk is the raw capture disposable.
+            try? FileManager.default.removeItem(at: destination.micScratch)
+            try? FileManager.default.removeItem(at: destination.systemScratch)
+
+            await MainActor.run {
+                self.recordingNoteId = nil
+                self.destination = nil
+                self.isFinishing = false
+            }
+            liveTranscriber = nil
+            return duration
+        } catch {
+            // A failed mixdown leaves the scratch audio in place (see `mix`), but
+            // the UI must not stay stuck showing a saving spinner.
+            await MainActor.run { self.isFinishing = false }
+            throw error
         }
-
-        let duration = try await Self.mix(
-            inputs: [destination.micScratch, destination.systemScratch],
-            to: destination.output
-        )
-
-        // Best-effort: a failed side track only costs speaker attribution, so
-        // it must never fail the recording itself.
-        _ = try? await Self.mix(inputs: [destination.micScratch], to: destination.micTrack)
-        _ = try? await Self.mix(inputs: [destination.systemScratch], to: destination.systemTrack)
-
-        // Only now that the mix is safely on disk is the raw capture disposable.
-        try? FileManager.default.removeItem(at: destination.micScratch)
-        try? FileManager.default.removeItem(at: destination.systemScratch)
-
-        await MainActor.run {
-            self.recordingNoteId = nil
-            self.destination = nil
-        }
-        liveTranscriber = nil
-        return duration
     }
 
     /// Called when the capture dies without the user asking it to. Salvages whatever

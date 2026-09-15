@@ -596,7 +596,21 @@ struct NoteEditorView: View {
 
     @ViewBuilder
     private func recordButton(current: Note) -> some View {
-        if isRecordingThisNote {
+        if isSavingThisNote {
+            // Occupies the record button's place for the whole mixdown, so the
+            // control never briefly offers to start a recording over audio that
+            // is still being written.
+            ZStack {
+                Circle()
+                    .fill(Theme.secondaryTextColor.opacity(0.35))
+                    .frame(width: 38, height: 38)
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white)
+            }
+            .help("Saving the recording…")
+            .accessibilityLabel("Saving the recording")
+        } else if isRecordingThisNote {
             Button(action: stopRecording) {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 16, weight: .bold))
@@ -752,18 +766,25 @@ struct NoteEditorView: View {
         recorder.isRecording && recorder.recordingNoteId == noteId
     }
 
+    /// Between Stop and the mixed recording landing on disk.
+    private var isSavingThisNote: Bool {
+        recorder.isFinishing && recorder.recordingNoteId == noteId
+    }
+
     /// The Live switch sits next to the record button only where recording can
     /// actually start: no audio on the note yet, nothing recording, and the
     /// macOS 26 streaming engine available in this build.
     private func liveToggleVisible(current: Note) -> Bool {
         AppleTranscriber.advancedAvailable
             && !recorder.isRecording
+            && !recorder.isFinishing
             && store.recordingURL(for: current) == nil
     }
 
     private func canGenerate(current: Note) -> Bool {
         generator.phase == .idle
             && !recorder.isRecording
+            && !recorder.isFinishing
             && (current.recordingFileName != nil || current.transcript != nil)
     }
 
