@@ -18,12 +18,13 @@ enum RecordingCommand {
         store: NotesStore,
         appState: AppState,
         recorder: AudioRecorder,
+        live: LiveTranscriber,
         generator: GenerationManager,
         notifier: NotificationManager,
         openWindow: OpenWindowAction
     ) {
         if recorder.isRecording {
-            stop(recorder: recorder, store: store, generator: generator, notifier: notifier)
+            stop(recorder: recorder, live: live, store: store, generator: generator, notifier: notifier)
             return
         }
         start(store: store, appState: appState, openWindow: openWindow)
@@ -39,6 +40,7 @@ enum RecordingCommand {
     /// ⌘R and the menu bar omit it and toast instead.
     static func stop(
         recorder: AudioRecorder,
+        live: LiveTranscriber,
         store: NotesStore,
         generator: GenerationManager,
         notifier: NotificationManager,
@@ -47,6 +49,14 @@ enum RecordingCommand {
         Task {
             do {
                 let recording = try await recorder.stop()
+                // A live recording's transcript is already done — saving it here,
+                // before setRecording and the automatic run, is what makes
+                // GenerationManager skip its transcription phase entirely.
+                if let transcript = await live.finishIfActive(),
+                   var note = store.note(id: recording.noteId) {
+                    note.transcript = transcript
+                    store.update(note)
+                }
                 store.setRecording(
                     noteId: recording.noteId,
                     fileName: recording.fileName,
@@ -107,6 +117,7 @@ struct RecordingCommands: Commands {
     @ObservedObject var store: NotesStore
     @ObservedObject var appState: AppState
     @ObservedObject var recorder: AudioRecorder
+    @ObservedObject var live: LiveTranscriber
     @ObservedObject var generator: GenerationManager
     @ObservedObject var notifier: NotificationManager
     @Environment(\.openWindow) private var openWindow
@@ -123,6 +134,7 @@ struct RecordingCommands: Commands {
                     store: store,
                     appState: appState,
                     recorder: recorder,
+                    live: live,
                     generator: generator,
                     notifier: notifier,
                     openWindow: openWindow

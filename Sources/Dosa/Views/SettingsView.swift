@@ -55,6 +55,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.anthropicAPIKeyKey) private var anthropicAPIKey = ""
     @AppStorage(AppSettings.anthropicModelKey) private var anthropicModel = AppSettings.defaultAnthropicModel
     @AppStorage(AppSettings.transcriptionEngineKey) private var transcriptionEngine = AppSettings.TranscriptionEngine.gemini.rawValue
+    @AppStorage(AppSettings.liveTranscriptionKey) private var liveTranscription = false
     @AppStorage(AppSettings.notesPromptKey) private var notesPrompt = AppSettings.defaultNotesPrompt
     @AppStorage(AppSettings.transcriptPromptKey) private var transcriptPrompt = AppSettings.defaultTranscriptPrompt
 
@@ -651,6 +652,17 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    Toggle("Live transcription while recording", isOn: $liveTranscription)
+                        .appFont(.body)
+                        .disabled(!AppleTranscriber.advancedAvailable)
+                    Text(AppleTranscriber.advancedAvailable
+                         ? "Shows a running transcript beside your notes while you record, and that transcript becomes the note's transcript — no re-transcription after the meeting. Always runs on-device, regardless of the engine picked above."
+                         : "Live transcription needs macOS 26's on-device speech engine, which isn't available in this build.")
+                        .appFont(.caption)
+                        .foregroundStyle(Theme.tertiaryTextColor)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } header: {
                     sectionHeader("Transcription")
                 } footer: {

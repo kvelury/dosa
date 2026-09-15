@@ -222,8 +222,31 @@ final class GenerationManager: ObservableObject {
             var markdown = Self.stripCodeFence(try await generateText(prompt))
             markdown = Self.stripLeadingTitleAndDate(markdown, title: latest.displayTitle)
             markdown = Self.normalizeBullets(markdown)
+
+            // No recorded note stays "Untitled Note": when the title is still
+            // blank after generation, ask the same provider for one. Best-effort —
+            // a failed title call must never fail the run — and checked again
+            // right before saving, in case the user typed a title mid-generation.
+            var generatedTitle: String?
+            if (store.note(id: noteId)?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let titlePrompt = """
+                Write a short, specific title for this meeting note (3-8 words). \
+                Reply with only the title itself — no quotes, no markdown, no trailing punctuation.
+
+                Notes:
+                \(markdown.prefix(6000))
+                """
+                if let raw = try? await generateText(titlePrompt) {
+                    generatedTitle = Self.cleanGeneratedTitle(raw)
+                }
+            }
+
             if var fresh = store.note(id: noteId) {
                 fresh.enhancedMarkdown = markdown
+                if let generatedTitle, !generatedTitle.isEmpty,
+                   fresh.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    fresh.title = generatedTitle
+                }
                 fresh.generationModel = providerModel
                 fresh.generationStyle = AppSettings.verbosityLevelNames[AppSettings.currentVerbosity]
                 store.update(fresh)
@@ -323,6 +346,26 @@ final class GenerationManager: ObservableObject {
                 return line
             }
             .joined(separator: "\n")
+    }
+
+    /// Models asked for "only the title" still sometimes wrap it in quotes, a
+    /// heading marker, or a code fence, or add a second explanatory line. Keep
+    /// the first real line, stripped down to plain text, capped to a sane length.
+    static func cleanGeneratedTitle(_ raw: String) -> String {
+        var title = stripCodeFence(raw)
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+        while title.hasPrefix("#") { title.removeFirst() }
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’*_ \t"))
+        while title.hasSuffix(".") || title.hasSuffix(":") {
+            title.removeLast()
+        }
+        title = title.trimmingCharacters(in: .whitespaces)
+        if title.count > 80 {
+            title = String(title.prefix(80)).trimmingCharacters(in: .whitespaces)
+        }
+        return title
     }
 
     private static func stripCodeFence(_ text: String) -> String {

@@ -71,6 +71,11 @@ final class AudioRecorder: NSObject, ObservableObject {
         let duration: TimeInterval
     }
 
+    /// Set by the start path when live mode is on; receives every captured buffer
+    /// on `sampleQueue`. Purely best-effort — nothing in the capture path may
+    /// fail because of it.
+    var liveTranscriber: LiveTranscriber?
+
     private var stream: SCStream?
     private var micEngine: AVAudioEngine?
     private var systemFile: AVAudioFile?
@@ -271,6 +276,7 @@ final class AudioRecorder: NSObject, ObservableObject {
             self.recordingNoteId = nil
             self.destination = nil
         }
+        liveTranscriber = nil
         return duration
     }
 
@@ -301,6 +307,7 @@ final class AudioRecorder: NSObject, ObservableObject {
             self.sampleQueue.async {
                 try? self.micFile?.write(from: buffer)
                 self.registerLevel(rms: rms)
+                self.liveTranscriber?.ingestMic(buffer)
             }
         }
         engine.prepare()
@@ -331,6 +338,7 @@ final class AudioRecorder: NSObject, ObservableObject {
     }
 
     private func teardownCapture() {
+        liveTranscriber = nil
         micEngine?.inputNode.removeTap(onBus: 0)
         micEngine?.stop()
         micEngine = nil
@@ -458,6 +466,9 @@ extension AudioRecorder: SCStreamDelegate, SCStreamOutput {
                 guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: bufferList.unsafePointer) else { return }
                 try file.write(from: pcmBuffer)
                 registerLevel(rms: Self.rms(of: pcmBuffer))
+                // Must run synchronously: pcmBuffer borrows the sample buffer's
+                // memory, and ingest copies it out via its format conversion.
+                liveTranscriber?.ingestSystem(pcmBuffer)
             }
         } catch {
             // Drop the buffer; a single failed write shouldn't kill the recording.

@@ -174,6 +174,15 @@ enum AppSettings {
 
     static let transcriptionEngineKey = "transcriptionEngine"
 
+    static let liveTranscriptionKey = "liveTranscriptionEnabled"
+
+    /// Live mode needs the macOS 26 streaming API; the stored flag is ignored
+    /// (and the toggle hidden) where SpeechAnalyzer isn't available.
+    static var liveTranscriptionEnabled: Bool {
+        UserDefaults.standard.bool(forKey: liveTranscriptionKey)
+            && AppleTranscriber.advancedAvailable
+    }
+
     enum TranscriptionEngine: String, CaseIterable {
         case gemini
         case appleAdvanced
