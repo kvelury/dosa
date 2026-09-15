@@ -356,6 +356,11 @@ struct NoteEditorView: View {
                     Color.clear.preference(key: BarTopBoxHeightKey.self, value: geo.size.height)
                 }
             }
+            // Panel and pull-tab share this box, so one bounds check covers both:
+            // a click on the tab is "inside" and leaves the toggle to do its job.
+            .onOutsideClick {
+                if showQuickSettings { showQuickSettings = false }
+            }
             barContent(current: current)
                 // Stays on the *bar's* top edge. Hung off the whole container it
                 // would pin itself to the top of the tab instead, floating above

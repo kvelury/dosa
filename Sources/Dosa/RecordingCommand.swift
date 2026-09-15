@@ -50,13 +50,18 @@ enum RecordingCommand {
         notifier: NotificationManager,
         onError: ((Error) -> Void)? = nil
     ) {
+        // Claimed and reflected in the UI synchronously, before any async work
+        // exists — the spinner must appear on the click, not once the mixdown gets
+        // scheduled. A second click (or a capture that already died) gets nil here
+        // and falls through silently.
+        guard let destination = recorder.beginStop() else { return }
         Task {
             // Started before the mixdown rather than after it: finalizing the
             // speech sessions and exporting the .m4a are independent, so running
             // them together puts the transcript on the note seconds sooner.
             async let liveTranscript = live.finishIfActive()
             do {
-                let recording = try await recorder.stop()
+                let recording = try await recorder.completeStop(destination: destination)
                 // A live recording's transcript is already done — saving it here,
                 // before setRecording and the automatic run, is what makes
                 // GenerationManager skip its transcription phase entirely.

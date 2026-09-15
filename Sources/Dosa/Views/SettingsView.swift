@@ -1014,6 +1014,7 @@ struct SettingsView: View {
         .onDisappear {
             appState.themeRefreshTick += 1
         }
+        .dismissesOnOutsideClick()
         .sheet(isPresented: $showingClientPasteSheet) {
             googleClientPasteSheet
         }
@@ -1045,6 +1046,7 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 480)
         .appFontScope()
+        .dismissesOnOutsideClick()
     }
 
     private func colorSwatch(_ name: String) -> some View {

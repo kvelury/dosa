@@ -220,33 +220,53 @@ final class AudioRecorder: NSObject, ObservableObject {
         return count > 0 ? sqrt(sum / Float(count)) : 0
     }
 
-    /// Stops recording and writes the mixed `.m4a` to the destination. Each source is
-    /// also kept as its own `.m4a` — transcribing them separately is what lets
-    /// on-device transcription attribute speech to the user vs. everyone else.
-    func stop() async throws -> Recording {
-        guard let destination, claimSession() else {
-            throw RecorderError.exportFailed("This recording has already finished.")
-        }
-        let duration = try await finish(destination: destination)
+    /// The synchronous half of stopping: claims the session and flips every piece
+    /// of recording UI in the caller's own runloop turn, so the saving spinner is
+    /// on screen the frame after the click. Returns nil when there is nothing to
+    /// stop — a second click, or a capture that already died on its own — in which
+    /// case the caller simply does nothing.
+    ///
+    /// Split out from the async work because the UI used to flip inside it: on a
+    /// busy Mac (live transcription tearing down, mixdown starting) those actor
+    /// hops queued behind real work and the recording looked like it kept going
+    /// for seconds after Stop.
+    @MainActor
+    func beginStop() -> Destination? {
+        guard let destination, claimSession() else { return nil }
+        markStopped()
+        return destination
+    }
+
+    /// The async half: tears the capture down and writes the mixed `.m4a`. Each
+    /// source is also kept as its own `.m4a` — transcribing them separately is
+    /// what lets on-device transcription attribute speech to the user vs. everyone
+    /// else. Caller must have won `beginStop()` first.
+    func completeStop(destination: Destination) async throws -> Recording {
+        let duration = try await teardownAndMix(destination: destination)
         return Recording(noteId: destination.noteId, fileName: destination.fileName, duration: duration)
     }
 
-    /// Tears the capture down, mixes what was captured, and clears the scratch files.
-    /// The caller must already have won `claimSession()`.
-    private func finish(destination: Destination) async throws -> TimeInterval {
-        await MainActor.run {
-            self.timer?.invalidate()
-            self.timer = nil
-            self.levelTimer?.invalidate()
-            self.levelTimer = nil
-            self.ringTimer?.invalidate()
-            self.ringTimer = nil
-            self.ringPhase = 0
-            self.isRecording = false
-            self.isFinishing = true
-            self.levelHistory = Self.emptyLevels
-        }
+    /// Everything that visibly ends a recording, in one synchronous main-actor
+    /// step. The capture itself is torn down moments later in `teardownAndMix`,
+    /// deliberately — stopping the streams is what could clip the last word, and
+    /// the UI should not wait on it.
+    @MainActor
+    private func markStopped() {
+        timer?.invalidate()
+        timer = nil
+        levelTimer?.invalidate()
+        levelTimer = nil
+        ringTimer?.invalidate()
+        ringTimer = nil
+        ringPhase = 0
+        isRecording = false
+        isFinishing = true
+        levelHistory = Self.emptyLevels
+    }
 
+    /// Tears the capture down, mixes what was captured, and clears the scratch files.
+    /// The caller must already have won the session and called `markStopped()`.
+    private func teardownAndMix(destination: Destination) async throws -> TimeInterval {
         do {
             micEngine?.inputNode.removeTap(onBus: 0)
             micEngine?.stop()
@@ -296,10 +316,14 @@ final class AudioRecorder: NSObject, ObservableObject {
 
     /// Called when the capture dies without the user asking it to. Salvages whatever
     /// was recorded rather than leaving the user with nothing.
+    ///
+    /// Claims the session itself rather than going through `beginStop()`: this
+    /// races the user's Stop click, and whichever path claims first owns finishing.
     private func handleUnexpectedStop(message: String) {
         guard let destination, claimSession() else { return }
         Task {
-            let duration = try? await finish(destination: destination)
+            await MainActor.run { self.markStopped() }
+            let duration = try? await teardownAndMix(destination: destination)
             let recovered = duration.map {
                 RecoveredRecording(noteId: destination.noteId, fileName: destination.fileName, duration: $0)
             }

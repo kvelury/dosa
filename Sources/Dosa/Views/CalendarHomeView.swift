@@ -78,6 +78,10 @@ struct CalendarHomeView: View {
                 onCreateAndRecord: { createAndRecord(event) },
                 onOpenNote: { note in openNote(note) }
             )
+            // Applied here rather than inside the view: the same view is also
+            // presented as a popover from the editor's meeting pill, which
+            // already closes on an outside click.
+            .dismissesOnOutsideClick()
         }
     }
 
