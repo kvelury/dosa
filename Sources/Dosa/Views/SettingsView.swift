@@ -44,6 +44,8 @@ struct SettingsView: View {
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
     @AppStorage(AppSettings.fontFamilyKey) private var fontFamily = AppFontChoice.system.rawValue
     @AppStorage(AppSettings.textSizeKey) private var textSize = AppTextSize.regular.rawValue
+    @AppStorage(AppSettings.formattingToolbarPlacementKey)
+    private var formattingToolbarPlacement = FormattingToolbarPlacement.top.rawValue
     @AppStorage(AppSettings.notificationsEnabledKey) private var notificationsEnabled = true
     @AppStorage(AppSettings.automaticModeKey) private var automaticMode = false
     @AppStorage(AppSettings.automaticUpdateCheckKey) private var automaticUpdateCheck = true
@@ -942,6 +944,12 @@ struct SettingsView: View {
                     Picker("Text Size", selection: $textSize) {
                         ForEach(AppTextSize.allCases) { size in
                             Text(size.displayName).tag(size.rawValue)
+                        }
+                    }
+                    .appFont(.body)
+                    Picker("Formatting Toolbar", selection: $formattingToolbarPlacement) {
+                        ForEach(FormattingToolbarPlacement.allCases) { placement in
+                            Text(placement.displayName).tag(placement.rawValue)
                         }
                     }
                     .appFont(.body)

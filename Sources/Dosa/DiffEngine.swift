@@ -103,8 +103,9 @@ enum DiffEngine {
         return result
     }
 
-    // Matches MarkdownStyler.headingFont(level:) in MarkdownTextEditor.swift —
-    // kept identical so this preview and the live editor never disagree.
+    // The heading scale this unused preview path renders at. The live editor's
+    // heading sizes now come from MarkdownEngine, so the two are no longer
+    // required to agree — keep that in mind before reviving this path.
     private static func headingFontSize(level: Int) -> CGFloat {
         switch level {
         case 1: return 23

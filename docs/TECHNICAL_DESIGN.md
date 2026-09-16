@@ -77,8 +77,9 @@ Sources/Dosa/            DosaKit library (app + tests)
     SidebarView.swift    Multi-select list, pins, drag&drop, swipes, settings footer
     SidebarDeselectCatcher.swift  Empty-click deselection via NSEvent monitor
     NoteEditorView.swift Editor, floating bar, ⋯ menu, error sheet, exports
-    MarkdownTextEditor.swift  PaddedTextView + Coordinator + MarkdownStyler
-    TranscriptView.swift Transcript sheet (read-only MarkdownTextEditor)
+    DosaMarkdownEditor.swift  MarkdownEngine wrapper + text-view locator
+    FormattingToolbar.swift   Bold/italic/lists strip (top or floating-bar placement)
+    TranscriptView.swift Transcript sheet (read-only DosaMarkdownEditor)
     SearchViews.swift    Global search sheet, in-note popover, filter chips
     SettingsView.swift   All settings sections + export/import
     MenuBarMenu.swift    Windowless new/import/record/settings/update-check/quit actions
@@ -307,30 +308,44 @@ The notes prompt implements the "bi-directional" architecture: manual notes are 
 
 ## 6. Markdown editor & diff rendering
 
-### 6.1 MarkdownTextEditor (NSViewRepresentable)
+### 6.1 DosaMarkdownEditor (SwiftUI wrapper over MarkdownEngine)
 
-Parameters: `text: Binding<String>`, `diffAgainst: String?` (manual-notes base for diff coloring), `isEditable`, `highlight: TextHighlight?` (one-shot scroll+flash), `bottomContentInset: CGFloat` (74 in the editor so content scrolls clear of the floating bar).
+The editing surface is `MarkdownEngine`'s `NativeTextViewWrapper` — a TextKit 2 `NSTextView` that styles Markdown live, hides syntax markers at 0.1pt (so **display range == storage range**), continues and renumbers lists, indents with Tab/⇧Tab, and brings undo, spell-check, find/replace, Writing Tools and HTML-aware paste with it. `DosaMarkdownEditor` (`Views/DosaMarkdownEditor.swift`) is the thin wrapper that keeps Dosa's contract on top of it.
 
-**`PaddedTextView` (custom NSTextView)** exists for two hard-won reasons:
+> **CALLOUT — the editor's text is plain Markdown, in and out.** Persistence, search ranges, the AI diff, the Notion export and the file exports all read that one string. Nothing in the note marks a range as "AI"; an editor with its own document model would break all five at once. This is why the engine's marker-hiding (rather than a WYSIWYG model) is the load-bearing property, and why a WebView-based editor was rejected.
 
-> **CALLOUT — do not use NSScrollView.contentInsets**: setting `contentInsets` (even async after window insertion, even with re-tiling) leaves a clipped "solid strip" on first render until the user scrolls. The working solution: symmetric `textContainerInset` of `(top+bottom)/2` plus an override of `textContainerOrigin` pinning the container at `topPadding` (12) — the remainder becomes bottom padding inside the document geometry. Deterministic, correct on frame 1.
+Parameters, unchanged from the hand-rolled editor it replaced: `text: Binding<String>`, `diffAgainst: String?` (manual-notes base for diff coloring), `isEditable`, `highlight: TextHighlight?` (one-shot scroll+flash), `bottomContentInset: CGFloat` (102 so content scrolls clear of the floating bar), `documentId`, `onMediaFileDrop`, `onMediaDragChanged`.
 
-> **CALLOUT — manual scroll-view assembly loses two behaviors** that `NSTextView.scrollableTextView()` gave for free; both are restored in `syncWithClipView()` (driven by clip-view `frameDidChangeNotification`): (1) **width tracking** — text view width is pinned to the clip view so text re-wraps on window resize; (2) **min-height fill** — the view is kept at least viewport-height so clicks below short content still focus the editor.
+Engine configuration (`DosaMarkdownEditor.configuration`): `readingWidth: nil` (full width — the live split takes the pane to 320pt, where a centered column would waste half of it), `heightBehavior: .scrolls`, `textInsets` 16×12, `safeAreaInsets.bottom` + `overscroll.minPoints` = `bottomContentInset`, `autoClosePairsEnabled: false` (it fights Markdown link typing), theme mapped from `Theme`/`Typography`. `fontName`/`fontSize` are passed on every update from `Typography.nsFont(size: Typography.scaled(14))`, so a Font or Text Size change restyles live without a Settings-close rebuild.
 
-- Undo: a per-Coordinator `UndoManager` supplied via `undoManager(for:)`, plus `performKeyEquivalent` handling ⌘Z/⇧⌘Z directly (menu routing was unreliable in this hosting setup).
-- Keyboard behavior in `Coordinator.textView(_:doCommandBy:)`:
-  - Return: continues `-`/`*`/`+`/`1.` lists (numbered increments); Return on an empty item deletes the marker (ends the list).
-  - Tab / ⇧Tab: indents/outdents by 4 spaces at line start (multi-line selection supported; plain cursor on a non-list line just inserts spaces). Bullet markers move with the line; hanging indents follow automatically.
-- `updateNSView` only resets `string` when the binding truly differs (keystroke echoes are no-ops; cursor preserved). It also re-styles when `Theme.styleFingerprint` changes (theme/dosa-color/accent/font), tracked per-Coordinator. `MarkdownTextEditor` observes the font `AppStorage` key so a font change restyles immediately, without waiting for Settings to close.
+**The engine is a pinned fork** — `kvelury/swift-markdown-engine`, branched off upstream's `0.9.0` and carrying two embedder seams, both up for upstreaming (`Package.swift` pins the revision; the engine is pre-1.0 and its public API moves between minor versions):
 
-### 6.2 MarkdownStyler
+- `decorate: ((NSMutableAttributedString, NSRange) -> Void)?` — called inside the engine's own restyle transaction, on the full range after a rebuild and per restyled paragraph while typing. The AI-additions tint has no other way in: the restyle resets exactly the colors it sets.
+- `canAcceptDrop` / `onFileDrop` / `onDragHoverChange` — an `NSTextView` accepts file URLs and pastes their *paths* as text, and sits above anything SwiftUI draws behind it, so audio/video drops can't be intercepted from outside.
 
-Full-document restyle on every change (cheap at note scale). Per line: headings `#{1..6}` (selected app font at 23/19/16/14.5 bold, markers dimmed), bullets/numbered (marker tinted `Theme.current.highlight`, hanging indent via `headIndent` ≈ prefixWidth × fontSize × 0.52), quotes, ``` fences (toggle mono/secondary). Inline within the line: `` `code` `` (mono + `Theme.codeSpan`), `**bold**`, `*italic*`/`_italic_` — markers dimmed to tertiary. Body/heading faces come from `Typography` / the Settings font choice; code spans and fences stay on the system monospaced font.
+What stays on Dosa's side of the seam:
 
-> **CALLOUT — inline styling must skip the list-marker prefix** (`inlineStart`): a `*` bullet otherwise pairs with a stray mid-line `*` and fake-italicizes half the sentence. This bug shipped once; the prompt rule 7 + `normalizeBullets` are the belt-and-suspenders for model output, the `inlineStart` fix is the real cure.
+- **Cursor carve-outs** — `isCursorExcluded` converts the engine's window point to a screen point and asks `TextCursorCarveOutRegistry`, so the pointer reads as an arrow over the floating bar. See §9; any new overlay still needs `.textCursorCarveOut()`.
+- **Search flash** (`MarkdownEditorHandle`) — the engine owns its text view and exposes no handle, so `MarkdownEditorLocator` plants a zero-size marker behind the editor and walks *up from the marker* to the nearest ancestor containing an `NSTextView`. Searching from the marker rather than the window keeps it on this editor when several are on screen. `flashWhenVisible` then polls until the view's window is actually visible/on-screen (sheets animate in!), forces layout, scrolls, then `showFindIndicator` 0.15s later — without the wait the yellow flash is swallowed by sheet presentation.
+- **Undo** is the engine's, scoped per `documentId` (`"<noteId>-manual"` / `"-enhanced"` / `"-transcript"`), so switching notes or tabs doesn't leak undo history between documents.
 
-- Diff coloring (`applyDiffColors`): tokenize the document (words + `\n` tokens, whitespace-insensitive — `tokenizeWithRanges` mirrors `DiffEngine.tokenize` exactly), Myers-diff (`CollectionDifference`) against `diffAgainst`; inserted-token ranges get `DiffEngine.aiNSColor`. Typing attributes also use the Dosa color in diff mode (new typing = addition by definition).
-- `highlight` handling: `flashWhenVisible` polls until the view's window is actually visible/on-screen (sheets animate in!), forces layout, scrolls, then `showFindIndicator` 0.15 s later. Without the wait, the yellow flash is swallowed by sheet presentation.
+### 6.2 Diff tint (DiffTint)
+
+`DiffTint.apply` runs as the engine's `decorate` hook: tokenize the document (words + `\n` tokens, whitespace-insensitive — `tokenizeWithRanges` mirrors `DiffEngine.tokenize` exactly), Myers-diff (`CollectionDifference`) against `diffAgainst`, and re-apply `DiffEngine.aiNSColor` to inserted-token ranges that fall inside the range the engine just restyled.
+
+The diff is cached on `(text, base)` because one restyle pass decorates several paragraphs and would otherwise re-diff the whole document for each. A keystroke still costs one full tokenize + diff (the text changed, so the cache misses) — the same cost the previous editor paid, now the only O(document) work left in the typing path, since the engine's own restyle is per-paragraph.
+
+### 6.2b Formatting commands & toolbar
+
+`MarkdownFormatting` (`Editor/MarkdownFormatting.swift`) is pure text surgery: given the document and a selection it returns an `Edit {range, replacement, selection}`. No AppKit, so it is checkable — `MarkdownFormattingSelfChecks` runs in `DosaCalendarChecks` (this repo has no XCTest; Command Line Tools ship none).
+
+- Inline toggles wrap/unwrap `**bold**`, `_italic_`, `~~strike~~`, `` `code` ``, recognizing markers both inside and just outside the selection. **Italic uses `_`, not `*`** — same collision the `inlineStart` callout below is about.
+- Block toggles (`heading(1...3)`, bullet/numbered/task list, blockquote) apply to every line the selection touches, strip when all of them already match, and *replace* a different block marker rather than stacking one on top of it. Numbered lists renumber from 1.
+- Indent/outdent by 4 spaces; a caret on a plain line just gets spaces.
+
+`MarkdownFormattingCommand.perform` resolves the target from the responder chain (an `NSTextView` whose delegate is the engine's `NativeTextViewCoordinator`, and is editable) rather than holding it as state — a shortcut can fire while anything is focused, and the Format menu stays disabled otherwise. One `shouldChangeText`/`didChangeText` pair per action, so undo takes the whole action back in one step.
+
+`FormattingToolbar` renders those actions, in the placement chosen at Settings ▸ Theme ▸ Formatting Toolbar (`FormattingToolbarPlacement`, default `.top`): above the editor, or as a compact row inside the floating bar. Hidden whenever the editor is read-only. Shortcuts live in the Format menu (`DosaApp`): ⌘B, ⌘I, ⇧⌘X, ⌘E, ⌥⌘1/2/3, ⇧⌘8/7/9 (bullet/numbered/task), ⇧⌘. quote, ⌘]/⌘[ indent, ⌃⌘K link — ⌘K is Search All Notes, hence the control variant for Link.
 
 ### 6.3 View modes (NoteEditorView)
 
@@ -346,7 +361,7 @@ Full-document restyle on every change (cheap at note scale). Per line: headings 
 - `SearchService.matches(in:query:fields:maxPerField:)` — case-insensitive `NSString.range(of:)` loops per field (`title/manual/enhanced/transcript`), NSRange (UTF-16) offsets, snippets ±36 chars snapped to composed-character boundaries. `attributedSnippet` bolds/oranges (actually `Theme.highlight`) the query.
 - **Global search** (⌘K, sidebar icon): sheet over all active notes, filter chips (Title/Transcript/My Notes/Dosa Notes, all on by default, "select at least one" empty state), max 200 results.
 - **In-note search** (⌘F, floating-bar icon; only when transcript or Dosa notes exist because the popover anchors to that button): same, minus Title.
-- **Reveal machinery**: clicking a result sets `SearchCoordinator.pendingReveal {noteId, field, location, length}` (+ selects the note). `NoteEditorView` consumes it in `onAppear`/`onChange`: switches view mode for manual/enhanced, or opens the transcript sheet, and passes a `TextHighlight {id, range}` to the right `MarkdownTextEditor` → scroll + native yellow find indicator. ⌘F requests ride `AppState.noteSearchRequest: UUID?` (fresh UUID per press so `onChange` always fires; consumed and nilled by the editor).
+- **Reveal machinery**: clicking a result sets `SearchCoordinator.pendingReveal {noteId, field, location, length}` (+ selects the note). `NoteEditorView` consumes it in `onAppear`/`onChange`: switches view mode for manual/enhanced, or opens the transcript sheet, and passes a `TextHighlight {id, range}` to the right `DosaMarkdownEditor` → scroll + native yellow find indicator. ⌘F requests ride `AppState.noteSearchRequest: UUID?` (fresh UUID per press so `onChange` always fires; consumed and nilled by the editor).
 
 ---
 
@@ -356,7 +371,7 @@ Full-document restyle on every change (cheap at note scale). Per line: headings 
 - Overrides on top of any preset: **Accent Override** (Blue/Purple/Pink/Green/Graphite — red excluded deliberately; it means destructive/record) and **Dosa Notes Color** (Grey/Purple/Red/Dark Blue/Dark Green + "Theme Default" which follows the preset; stored value "Theme Default" or unset ⇒ preset default via `AppSettings.currentDosaColorName`).
 - Application: root `.tint(Theme.current.accentColor)` in ContentView (covers selection, sliders, pickers, chips, links); explicit `Theme.current.*` reads for play button, backgrounds, stat cards, key-cap chips, markdown bullet/code colors, search-match highlight, welcome gradient.
 - **Typography**: `Typography.swift` catalogs 10 macOS-installed faces (System / SF Pro, System Rounded, New York, Avenir Next, Helvetica Neue, Charter, Baskerville, Gill Sans, Optima, Palatino). Stored under `AppSettings.fontFamilyKey`, default System. The chosen face is the **inherited default** for every app-drawn surface: `appFontScope(_:)`, applied once at the root of each surface (the main window's content, and each sheet/popover), sets it as an environment font that descendants pick up automatically — the same mechanism `.appFont` / `.appMonoFont` use to set a role on top of it for one element (each modifier observes the setting so the change is live). The AppKit editor uses `Typography.nsFont` for body and headings. Code, timers, API keys, and shortcut glyphs stay on the system monospaced face. `Scripts/check-typography.sh`, run from `build.sh`, enforces both halves of this: every surface root still calls `appFontScope`, and no other view reaches for a raw `.font(` call (a `// system-font: <reason>` comment is the documented escape hatch for a deliberate exception, e.g. `SettingsView`'s Font-menu rows, which must each preview their own face rather than the active one).
-- **Type scale & Text Size**: `Typography.Role.baseSize` (hero 36 / noteTitle 26 / title2 17 / title3 15 / headline+body 14 / callout 13 / subheadline 12 / caption+caption2 11) is multiplied by `AppSettings.currentTextSize.scale` — `AppTextSize`: Small 0.92× / Default 1.0× / Large 1.15× / Larger 1.3×, stored under `AppSettings.textSizeKey`, set from Settings ▸ Theme — and rounded to the nearest 0.5pt via `Typography.scaled(_:)`/`Role.size`. `AppFontModifier` observes `textSizeKey` the same way it observes `fontFamilyKey`, so a Text Size change re-renders every `.appFont`/`.appFontScope` surface live. `MarkdownStyler` (editor) and `DiffEngine` (unused preview path, kept in sync anyway) scale their own literal sizes through `Typography.scaled(_:)` rather than going through `Role`. See §8b.
+- **Type scale & Text Size**: `Typography.Role.baseSize` (hero 36 / noteTitle 26 / title2 17 / title3 15 / headline+body 14 / callout 13 / subheadline 12 / caption+caption2 11) is multiplied by `AppSettings.currentTextSize.scale` — `AppTextSize`: Small 0.92× / Default 1.0× / Large 1.15× / Larger 1.3×, stored under `AppSettings.textSizeKey`, set from Settings ▸ Theme — and rounded to the nearest 0.5pt via `Typography.scaled(_:)`/`Role.size`. `AppFontModifier` observes `textSizeKey` the same way it observes `fontFamilyKey`, so a Text Size change re-renders every `.appFont`/`.appFontScope` surface live. `DosaMarkdownEditor` and `DiffEngine` (unused preview path, kept in sync anyway) scale their own literal sizes through `Typography.scaled(_:)` rather than going through `Role`. See §8b.
 
   **Surfaces that do not inherit it, and cannot be restyled** — SwiftUI's `.font()` environment value only reaches views SwiftUI itself draws:
   - **NSMenu-drawn surfaces** — contextual menus, the editor's ⋯ menu and the sidebar's ＋ menu, `QuickSettingsPanel`'s model menu, `MenuBarExtra`, and `.commands` (`DosaApp.swift`, `RecordingCommand.swift`).
@@ -379,7 +394,7 @@ WCAG AA (4.5:1 text, 3:1 non-text) is the floor everywhere in the app, across al
   - `Theme.derived(_:)` is what makes composing these safe: it wraps a closure that reads other dynamic `NSColor`s (like a palette's `accent`) as a new dynamic `NSColor`, resolving under whichever appearance the caller queries it in — instead of baking in whatever appearance happened to be current when the token was first touched.
   - A few light-mode palette values were darkened outright (Masala/Chutney/Crepe `highlight`, Chutney `accent`/`codeSpan`) and two dark-mode values lightened (Masala/Slate `highlightDeep`) — see the inline comments in `Theme.palette(named:)` for the specific before/after ratios.
 - **Reduce Transparency**: `FloatingChrome`'s pre-26 material fallback checks `NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency` and swaps `.regularMaterial` for an opaque `Theme.current.cardFillColor` when it's on — text contrast against a translucent material is unmeasurable, since its backdrop is whatever's behind the window. macOS 26's `.glassEffect` handles this natively.
-- **Color-only signaling** (WCAG 1.4.1): Dosa's additions in the diff view are distinguished from manual notes by color alone (`MarkdownStyler.applyDiffColors`, and `DiffEngine.attributedDiff` for its unused-but-kept-in-sync preview counterpart). The "Dosa additions" legend label in `NoteEditorView` uses the same color. Underlines were tried as a redundant non-color channel and dropped because they fought markdown styling (headings, bold, list markers) and looked worse than color-only.
+- **Color-only signaling** (WCAG 1.4.1): Dosa's additions in the diff view are distinguished from manual notes by color alone (`DiffTint`, and `DiffEngine.attributedDiff` for its unused-but-kept-in-sync preview counterpart). The "Dosa additions" legend label in `NoteEditorView` uses the same color. Underlines were tried as a redundant non-color channel and dropped because they fought markdown styling (headings, bold, list markers) and looked worse than color-only.
 - **VoiceOver**: every icon-only control has a real `.accessibilityLabel` (or is built from `Label(_:systemImage:)` + `.labelStyle(.iconOnly)`, which gets one for free — see `BackToWelcomeToolbar`'s `button`). `.help()` alone does not provide this — it sets the AX *help* attribute, not the AX *label*, so VoiceOver announced these as unnamed before. Decorative icons (waveform bars, theme-card preview dots) are `.accessibilityHidden(true)` instead. A `.labelsHidden()` control (segmented pickers, sliders, the date picker) gets an explicit `.accessibilityLabel` since it has no visible one to fall back to.
 - **Keyboard reachability**: a few disclosure affordances (sidebar's Deleted Notes / folder rows, Settings' prompt-group labels, the error dialog's "Show technical details") used to be `.onTapGesture`-only, which SwiftUI never makes focusable. They're real `Button`s now.
 - **Hit targets**: icon-only sidebar toolbar buttons and the floating bar's quick-settings pull-tab (52×18 drawn, per `BarPedestalShape` — see §9d) got their *hit* area padded toward ~24pt without changing what's drawn, via an explicit `.frame` on the button's content or (for the pull-tab, whose drawn silhouette must not grow) `OutsetRectangle`, a `Shape` that insets a rect *outward* for `.contentShape(_:)` only.
@@ -623,7 +638,7 @@ Load-bearing details:
   (`width - 2*(barCornerRadius + jointRadius)`); the narrowest real bar is ~430 pt against a 320 pt
   panel, so this only matters in degenerate layouts. `topHeight <= 0` degrades to a plain rounded
   rect — the bar exactly as it was before the tab existed.
-- `MarkdownTextEditor`'s `bottomContentInset` went 74 → 88 → 102 as the bar scaled up to match the
+- The editor's `bottomContentInset` went 74 → 88 → 102 as the bar scaled up to match the
   global search icon's 16 pt glyph (`NoteEditorView.barBottomInset`, derived from the bar's own
   metrics in a comment there). The open panel is still transient and reserves nothing.
 - `NotesStyleSlider` is shared verbatim with Settings (§11) rather than reimplemented, so the two

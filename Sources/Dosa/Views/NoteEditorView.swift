@@ -45,6 +45,8 @@ struct NoteEditorView: View {
     @State private var showDatePicker = false
     @State private var showMeeting = false
     @AppStorage(AppSettings.liveTranscriptionKey) private var liveTranscription = false
+    @AppStorage(AppSettings.formattingToolbarPlacementKey)
+    private var formattingToolbarPlacement = FormattingToolbarPlacement.top.rawValue
 
     private var isImporting: Bool {
         appState.importingNoteIds.contains(noteId)
@@ -241,15 +243,19 @@ struct NoteEditorView: View {
     private func content(note: Binding<Note>, current: Note) -> some View {
         if liveSplitActive {
             HSplitView {
-                MarkdownTextEditor(
-                    text: note.manualText,
-                    highlight: editorHighlight,
-                    bottomContentInset: Self.barBottomInset,
-                    onMediaFileDrop: { requestAudio(.importFile($0)) },
-                    onMediaDragChanged: { isDropTargeted = $0 }
-                )
-                .accessibilityLabel("My notes, editable")
-                .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 0) {
+                    topFormattingToolbar
+                    DosaMarkdownEditor(
+                        text: note.manualText,
+                        highlight: editorHighlight,
+                        bottomContentInset: Self.barBottomInset,
+                        documentId: "\(noteId)-manual",
+                        onMediaFileDrop: { requestAudio(.importFile($0)) },
+                        onMediaDragChanged: { isDropTargeted = $0 }
+                    )
+                    .accessibilityLabel("My notes, editable")
+                    .padding(.top, 2)
+                }
                 .frame(minWidth: 320)
                 .layoutPriority(1)
                 LiveTranscriptPane(live: live)
@@ -271,11 +277,13 @@ struct NoteEditorView: View {
                 .padding(.bottom, 7)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Legend: your notes shown in the default color, Dosa's additions tinted")
-                MarkdownTextEditor(
+                topFormattingToolbar
+                DosaMarkdownEditor(
                     text: enhancedBinding(note: note),
                     diffAgainst: current.manualText,
                     highlight: editorHighlight,
                     bottomContentInset: Self.barBottomInset,
+                    documentId: "\(noteId)-enhanced",
                     onMediaFileDrop: { requestAudio(.importFile($0)) },
                     onMediaDragChanged: { isDropTargeted = $0 }
                 )
@@ -296,17 +304,31 @@ struct NoteEditorView: View {
                     .padding(.vertical, 6)
                     .accessibilityElement(children: .combine)
                 }
-                MarkdownTextEditor(
+                if current.enhancedMarkdown == nil {
+                    topFormattingToolbar
+                }
+                DosaMarkdownEditor(
                     text: note.manualText,
                     isEditable: current.enhancedMarkdown == nil,
                     highlight: editorHighlight,
                     bottomContentInset: Self.barBottomInset,
+                    documentId: "\(noteId)-manual",
                     onMediaFileDrop: { requestAudio(.importFile($0)) },
                     onMediaDragChanged: { isDropTargeted = $0 }
                 )
                 .accessibilityLabel(current.enhancedMarkdown == nil ? "My notes, editable" : "My notes, read-only")
                 .padding(.top, 2)
             }
+        }
+    }
+
+    /// The formatting strip, when the user keeps it above the editor. The
+    /// floating-bar placement renders the same control in `mainBarRow` instead.
+    @ViewBuilder
+    private var topFormattingToolbar: some View {
+        if FormattingToolbarPlacement.resolved(formattingToolbarPlacement) == .top {
+            FormattingToolbar()
+                .textCursorCarveOut()
         }
     }
 
@@ -379,6 +401,10 @@ struct NoteEditorView: View {
 
     private func barContent(current: Note) -> some View {
         VStack(spacing: 10) {
+            if FormattingToolbarPlacement.resolved(formattingToolbarPlacement) == .bottom,
+               editorIsEditable(current: current) {
+                FormattingToolbar(compact: true)
+            }
             if player.playingNoteId == noteId {
                 scrubBar
             }
@@ -386,6 +412,14 @@ struct NoteEditorView: View {
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 12)
+    }
+
+    /// Whether the editor on screen accepts typing — the formatting strip has
+    /// nothing to act on otherwise.
+    private func editorIsEditable(current: Note) -> Bool {
+        if liveSplitActive { return true }
+        if viewMode == .aiNotes, current.enhancedMarkdown != nil { return true }
+        return current.enhancedMarkdown == nil
     }
 
     /// The pull-tab. It sits between the panel and the bar, so the same control
