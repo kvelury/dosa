@@ -74,6 +74,20 @@ public struct DosaApp: App {
 
     public init() {}
 
+    /// One Format-menu row. Disabled unless a note editor has focus, so the
+    /// shortcut can't fire into a text field or the note list.
+    private func formatItem(
+        _ action: MarkdownFormattingAction,
+        _ key: KeyEquivalent,
+        _ modifiers: EventModifiers
+    ) -> some View {
+        Button(action.title) {
+            MarkdownFormattingCommand.perform(action)
+        }
+        .keyboardShortcut(key, modifiers: modifiers)
+        .disabled(!MarkdownFormattingCommand.canFormat)
+    }
+
     public var body: some Scene {
         Window("Dosa", id: Self.mainWindowID) {
             ContentView()
@@ -130,6 +144,26 @@ public struct DosaApp: App {
                     appState.selectedNoteIds = []
                 }
                 .keyboardShortcut("w", modifiers: .command)
+            }
+            CommandMenu("Format") {
+                formatItem(.bold, "b", [.command])
+                formatItem(.italic, "i", [.command])
+                formatItem(.strikethrough, "x", [.command, .shift])
+                formatItem(.inlineCode, "e", [.command])
+                Divider()
+                formatItem(.heading(1), "1", [.command, .option])
+                formatItem(.heading(2), "2", [.command, .option])
+                formatItem(.heading(3), "3", [.command, .option])
+                Divider()
+                formatItem(.bulletList, "8", [.command, .shift])
+                formatItem(.numberedList, "7", [.command, .shift])
+                formatItem(.taskList, "9", [.command, .shift])
+                formatItem(.blockquote, ".", [.command, .shift])
+                Divider()
+                formatItem(.indent, "]", [.command])
+                formatItem(.outdent, "[", [.command])
+                // ⌘K is Search All Notes, so Link takes the control variant.
+                formatItem(.link, "k", [.command, .control])
             }
             CommandMenu("Search") {
                 Button("Search All Notes…") {

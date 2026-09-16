@@ -145,7 +145,7 @@ enum Typography {
         var nsWeight: NSFont.Weight { Typography.nsWeight(weight) }
     }
 
-    /// The current Text Size multiplier. AppKit call sites (`MarkdownStyler`,
+    /// The current Text Size multiplier. AppKit call sites (`DosaMarkdownEditor`,
     /// `DiffEngine`) that build their own font scale off a literal base size
     /// multiply by this directly instead of going through `Role`.
     static var textScale: CGFloat { AppSettings.currentTextSize.scale }

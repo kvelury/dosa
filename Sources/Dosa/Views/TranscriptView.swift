@@ -47,10 +47,11 @@ struct TranscriptView: View {
             } else {
                 // Imported or hand-edited transcripts that don't follow either
                 // Dosa format still get shown, just without the row treatment.
-                MarkdownTextEditor(
+                DosaMarkdownEditor(
                     text: .constant(note.transcript ?? "No transcript yet. Record the meeting and click Generate Notes first."),
                     isEditable: false,
-                    highlight: highlight
+                    highlight: highlight,
+                    documentId: "\(note.id)-transcript"
                 )
                 .accessibilityLabel("Transcript")
             }
@@ -94,7 +95,7 @@ struct TranscriptView: View {
 
     /// Maps a search hit's character range onto the row that contains it — the
     /// sheet renders rows rather than one text run, so the range can't be applied
-    /// directly the way `MarkdownTextEditor` does it.
+    /// directly the way `DosaMarkdownEditor` does it.
     private func reveal(
         _ highlight: TextHighlight?,
         in parsed: TranscriptParsing.Parsed,
