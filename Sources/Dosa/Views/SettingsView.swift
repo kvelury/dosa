@@ -55,6 +55,8 @@ struct SettingsView: View {
     @AppStorage(AppSettings.anthropicAPIKeyKey) private var anthropicAPIKey = ""
     @AppStorage(AppSettings.anthropicModelKey) private var anthropicModel = AppSettings.defaultAnthropicModel
     @AppStorage(AppSettings.transcriptionEngineKey) private var transcriptionEngine = AppSettings.TranscriptionEngine.gemini.rawValue
+    @AppStorage(AppSettings.liveTranscriptionKey) private var liveTranscription = false
+    @AppStorage(AppSettings.liveTranscriptionSpeedKey) private var liveTranscriptionSpeed = AppSettings.LiveTranscriptionSpeed.accurate.rawValue
     @AppStorage(AppSettings.notesPromptKey) private var notesPrompt = AppSettings.defaultNotesPrompt
     @AppStorage(AppSettings.transcriptPromptKey) private var transcriptPrompt = AppSettings.defaultTranscriptPrompt
 
@@ -578,6 +580,20 @@ struct SettingsView: View {
         }
     }
 
+    /// What the selected live-transcription speed costs and buys. Spells out
+    /// which tiers keep their live text as the note's transcript, since that is
+    /// the part with a visible consequence after the meeting.
+    private var liveSpeedBlurb: String {
+        switch AppSettings.LiveTranscriptionSpeed(rawValue: liveTranscriptionSpeed) ?? .accurate {
+        case .accurate:
+            return "Best quality, and the live transcript becomes the note's transcript — nothing is transcribed twice."
+        case .fast:
+            return "Text appears sooner, slightly less accurate. Used for the live view only: after the meeting the recording is transcribed again with the engine picked above."
+        case .lightweight:
+            return "The lightest model — best on Macs with 8 GB of memory. Dictation-grade quality, live view only: after the meeting the recording is transcribed again with the engine picked above."
+        }
+    }
+
     /// Providers whose API key field is non-empty — the choices for the
     /// Default Provider picker. Derived from the view's own @AppStorage keys
     /// so the picker updates live as keys are typed or cleared.
@@ -651,6 +667,30 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    Toggle("Live transcription while recording", isOn: $liveTranscription)
+                        .appFont(.body)
+                        .disabled(!AppleTranscriber.advancedAvailable)
+                    Text(AppleTranscriber.advancedAvailable
+                         ? "Shows a running transcript beside your notes while you record. Always runs on-device, regardless of the engine picked above."
+                         : "Live transcription needs macOS 26's on-device speech engine, which isn't available in this build.")
+                        .appFont(.caption)
+                        .foregroundStyle(Theme.tertiaryTextColor)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Picker("Live Speed", selection: $liveTranscriptionSpeed) {
+                        ForEach(AppSettings.LiveTranscriptionSpeed.allCases, id: \.rawValue) { speed in
+                            Text(speed.displayName).tag(speed.rawValue)
+                        }
+                    }
+                    .appFont(.body)
+                    .disabled(!liveTranscription || !AppleTranscriber.advancedAvailable)
+                    Text(liveSpeedBlurb)
+                        .appFont(.caption)
+                        .foregroundStyle(Theme.tertiaryTextColor)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } header: {
                     sectionHeader("Transcription")
                 } footer: {
@@ -974,6 +1014,7 @@ struct SettingsView: View {
         .onDisappear {
             appState.themeRefreshTick += 1
         }
+        .dismissesOnOutsideClick()
         .sheet(isPresented: $showingClientPasteSheet) {
             googleClientPasteSheet
         }
@@ -1005,6 +1046,7 @@ struct SettingsView: View {
         .padding(20)
         .frame(width: 480)
         .appFontScope()
+        .dismissesOnOutsideClick()
     }
 
     private func colorSwatch(_ name: String) -> some View {

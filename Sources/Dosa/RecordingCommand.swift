@@ -6,6 +6,9 @@ enum RecordingCommand {
     /// Whether ⌘R (and the File menu item) do anything right now. Drives `.disabled`.
     static func isAvailable(store: NotesStore, appState: AppState, recorder: AudioRecorder) -> Bool {
         if recorder.isRecording { return true }
+        // Mid-mixdown: neither stopping (already stopped) nor starting (would
+        // overwrite audio still being written) is a valid thing to do.
+        if recorder.isFinishing { return false }
         guard let id = appState.singleSelectedNoteId,
               let note = store.note(id: id),
               !note.isDeleted
@@ -18,14 +21,16 @@ enum RecordingCommand {
         store: NotesStore,
         appState: AppState,
         recorder: AudioRecorder,
+        live: LiveTranscriber,
         generator: GenerationManager,
         notifier: NotificationManager,
         openWindow: OpenWindowAction
     ) {
         if recorder.isRecording {
-            stop(recorder: recorder, store: store, generator: generator, notifier: notifier)
+            stop(recorder: recorder, live: live, store: store, generator: generator, notifier: notifier)
             return
         }
+        guard !recorder.isFinishing else { return }
         start(store: store, appState: appState, openWindow: openWindow)
     }
 
@@ -39,14 +44,32 @@ enum RecordingCommand {
     /// ⌘R and the menu bar omit it and toast instead.
     static func stop(
         recorder: AudioRecorder,
+        live: LiveTranscriber,
         store: NotesStore,
         generator: GenerationManager,
         notifier: NotificationManager,
         onError: ((Error) -> Void)? = nil
     ) {
+        // Claimed and reflected in the UI synchronously, before any async work
+        // exists — the spinner must appear on the click, not once the mixdown gets
+        // scheduled. A second click (or a capture that already died) gets nil here
+        // and falls through silently.
+        guard let destination = recorder.beginStop() else { return }
         Task {
+            // Started before the mixdown rather than after it: finalizing the
+            // speech sessions and exporting the .m4a are independent, so running
+            // them together puts the transcript on the note seconds sooner.
+            async let liveTranscript = live.finishIfActive()
             do {
-                let recording = try await recorder.stop()
+                let recording = try await recorder.completeStop(destination: destination)
+                // A live recording's transcript is already done — saving it here,
+                // before setRecording and the automatic run, is what makes
+                // GenerationManager skip its transcription phase entirely.
+                if let transcript = await liveTranscript,
+                   var note = store.note(id: recording.noteId) {
+                    note.transcript = transcript
+                    store.update(note)
+                }
                 store.setRecording(
                     noteId: recording.noteId,
                     fileName: recording.fileName,
@@ -58,6 +81,9 @@ enum RecordingCommand {
                 notifier.post(.recordingSaved(noteId: recording.noteId, title: title))
                 generator.enqueueAutomatic(noteId: recording.noteId, store: store, notifier: notifier)
             } catch {
+                // Consume the concurrent finalization either way; the live
+                // pipeline has already torn itself down at this point.
+                _ = await liveTranscript
                 if let onError {
                     onError(error)
                 } else {
@@ -107,6 +133,7 @@ struct RecordingCommands: Commands {
     @ObservedObject var store: NotesStore
     @ObservedObject var appState: AppState
     @ObservedObject var recorder: AudioRecorder
+    @ObservedObject var live: LiveTranscriber
     @ObservedObject var generator: GenerationManager
     @ObservedObject var notifier: NotificationManager
     @Environment(\.openWindow) private var openWindow
@@ -123,6 +150,7 @@ struct RecordingCommands: Commands {
                     store: store,
                     appState: appState,
                     recorder: recorder,
+                    live: live,
                     generator: generator,
                     notifier: notifier,
                     openWindow: openWindow

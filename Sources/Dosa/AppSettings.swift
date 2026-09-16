@@ -174,6 +174,50 @@ enum AppSettings {
 
     static let transcriptionEngineKey = "transcriptionEngine"
 
+    static let liveTranscriptionKey = "liveTranscriptionEnabled"
+
+    /// Live mode needs the macOS 26 streaming API; the stored flag is ignored
+    /// (and the toggle hidden) where SpeechAnalyzer isn't available.
+    static var liveTranscriptionEnabled: Bool {
+        UserDefaults.standard.bool(forKey: liveTranscriptionKey)
+            && AppleTranscriber.advancedAvailable
+    }
+
+    static let liveTranscriptionSpeedKey = "liveTranscriptionSpeed"
+
+    /// How eagerly the live transcriber trades accuracy for lower latency. The
+    /// faster tiers matter most on memory-constrained Macs (an 8 GB M1 Air lags
+    /// noticeably where an M4 Pro does not).
+    enum LiveTranscriptionSpeed: String, CaseIterable {
+        /// Full SpeechTranscriber, results committed normally. The live
+        /// transcript is trustworthy enough to become the note's transcript.
+        case accurate
+        /// Full SpeechTranscriber with `.fastResults` — text lands sooner at
+        /// some cost in accuracy, so it is preview-only.
+        case fast
+        /// DictationTranscriber: the lighter dictation model, finalizing
+        /// frequently. Cheapest to run, dictation-grade, preview-only.
+        case lightweight
+
+        var displayName: String {
+            switch self {
+            case .accurate: return "Accurate"
+            case .fast: return "Fast"
+            case .lightweight: return "Lightweight"
+            }
+        }
+
+        /// Only Accurate's live transcript is kept as the note's transcript.
+        /// The other tiers show text sooner and let the normal post-meeting
+        /// pipeline produce the transcript that gets saved.
+        var liveTranscriptIsFinal: Bool { self == .accurate }
+    }
+
+    static var liveTranscriptionSpeed: LiveTranscriptionSpeed {
+        LiveTranscriptionSpeed(rawValue: UserDefaults.standard.string(forKey: liveTranscriptionSpeedKey) ?? "")
+            ?? .accurate
+    }
+
     enum TranscriptionEngine: String, CaseIterable {
         case gemini
         case appleAdvanced

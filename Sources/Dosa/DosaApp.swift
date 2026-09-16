@@ -62,6 +62,7 @@ public struct DosaApp: App {
     @StateObject private var store = NotesStore()
     @StateObject private var templates = TemplateStore.shared
     @StateObject private var recorder = AudioRecorder()
+    @StateObject private var live = LiveTranscriber()
     @StateObject private var player = AudioPlayer()
     @StateObject private var generator = GenerationManager()
     @StateObject private var search = SearchCoordinator()
@@ -79,6 +80,7 @@ public struct DosaApp: App {
                 .environmentObject(store)
                 .environmentObject(templates)
                 .environmentObject(recorder)
+                .environmentObject(live)
                 .environmentObject(player)
                 .environmentObject(generator)
                 .environmentObject(search)
@@ -95,6 +97,7 @@ public struct DosaApp: App {
                 store: store,
                 appState: appState,
                 recorder: recorder,
+                live: live,
                 generator: generator,
                 notifier: notifier
             )
@@ -146,6 +149,7 @@ public struct DosaApp: App {
                 .environmentObject(templates)
                 .environmentObject(appState)
                 .environmentObject(recorder)
+                .environmentObject(live)
                 .environmentObject(generator)
                 .environmentObject(notifier)
                 .environmentObject(updater)

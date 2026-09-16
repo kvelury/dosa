@@ -6,6 +6,7 @@ struct NoteEditorView: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var recorder: AudioRecorder
+    @EnvironmentObject private var live: LiveTranscriber
     @EnvironmentObject private var player: AudioPlayer
     @EnvironmentObject private var generator: GenerationManager
     @EnvironmentObject private var search: SearchCoordinator
@@ -43,6 +44,7 @@ struct NoteEditorView: View {
     @State private var transcriptHighlight: TextHighlight?
     @State private var showDatePicker = false
     @State private var showMeeting = false
+    @AppStorage(AppSettings.liveTranscriptionKey) private var liveTranscription = false
 
     private var isImporting: Bool {
         appState.importingNoteIds.contains(noteId)
@@ -228,9 +230,32 @@ struct NoteEditorView: View {
         return "\(model.lowercased()) (\(style.lowercased()))"
     }
 
+    /// The two-pane live layout applies while this note is being recorded in
+    /// live mode. A fresh live recording can't have generated notes yet (record
+    /// requires an empty note), so only the My Notes branch needs the split.
+    private var liveSplitActive: Bool {
+        isRecordingThisNote && live.isActive
+    }
+
     @ViewBuilder
     private func content(note: Binding<Note>, current: Note) -> some View {
-        if viewMode == .aiNotes, current.enhancedMarkdown != nil {
+        if liveSplitActive {
+            HSplitView {
+                MarkdownTextEditor(
+                    text: note.manualText,
+                    highlight: editorHighlight,
+                    bottomContentInset: Self.barBottomInset,
+                    onMediaFileDrop: { requestAudio(.importFile($0)) },
+                    onMediaDragChanged: { isDropTargeted = $0 }
+                )
+                .accessibilityLabel("My notes, editable")
+                .padding(.top, 2)
+                .frame(minWidth: 320)
+                .layoutPriority(1)
+                LiveTranscriptPane(live: live)
+                    .frame(minWidth: 280, idealWidth: 360)
+            }
+        } else if viewMode == .aiNotes, current.enhancedMarkdown != nil {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 14) {
                     Label("Your notes", systemImage: "circle.fill")
@@ -330,6 +355,11 @@ struct NoteEditorView: View {
                 GeometryReader { geo in
                     Color.clear.preference(key: BarTopBoxHeightKey.self, value: geo.size.height)
                 }
+            }
+            // Panel and pull-tab share this box, so one bounds check covers both:
+            // a click on the tab is "inside" and leaves the toggle to do its job.
+            .onOutsideClick {
+                if showQuickSettings { showQuickSettings = false }
             }
             barContent(current: current)
                 // Stays on the *bar's* top edge. Hung off the whole container it
@@ -444,6 +474,31 @@ struct NoteEditorView: View {
                     .appMonoFont(size: 15)
                     .foregroundStyle(Theme.current.dangerTextColor)
                     .accessibilityLabel("Recording, \(TimeFormatting.spoken(recorder.elapsed))")
+                if live.isActive {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Theme.current.accentColor)
+                            .frame(width: 6, height: 6)
+                        Text("LIVE")
+                            .appFont(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Theme.current.accentColor)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Live transcription on")
+                }
+            }
+            if liveToggleVisible(current: current) {
+                Toggle(isOn: $liveTranscription) {
+                    Text("Live")
+                        .appFont(.subheadline)
+                        .foregroundStyle(Theme.secondaryTextColor)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .cursor(.pointingHand)
+                .help("Show a live transcript while recording. The live transcript becomes the note's transcript — transcription runs on-device.")
+                .accessibilityLabel("Live transcription")
             }
             if isImporting {
                 ProgressView()
@@ -546,7 +601,21 @@ struct NoteEditorView: View {
 
     @ViewBuilder
     private func recordButton(current: Note) -> some View {
-        if isRecordingThisNote {
+        if isSavingThisNote {
+            // Occupies the record button's place for the whole mixdown, so the
+            // control never briefly offers to start a recording over audio that
+            // is still being written.
+            ZStack {
+                Circle()
+                    .fill(Theme.secondaryTextColor.opacity(0.35))
+                    .frame(width: 38, height: 38)
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white)
+            }
+            .help("Saving the recording…")
+            .accessibilityLabel("Saving the recording")
+        } else if isRecordingThisNote {
             Button(action: stopRecording) {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 16, weight: .bold))
@@ -702,9 +771,25 @@ struct NoteEditorView: View {
         recorder.isRecording && recorder.recordingNoteId == noteId
     }
 
+    /// Between Stop and the mixed recording landing on disk.
+    private var isSavingThisNote: Bool {
+        recorder.isFinishing && recorder.recordingNoteId == noteId
+    }
+
+    /// The Live switch sits next to the record button only where recording can
+    /// actually start: no audio on the note yet, nothing recording, and the
+    /// macOS 26 streaming engine available in this build.
+    private func liveToggleVisible(current: Note) -> Bool {
+        AppleTranscriber.advancedAvailable
+            && !recorder.isRecording
+            && !recorder.isFinishing
+            && store.recordingURL(for: current) == nil
+    }
+
     private func canGenerate(current: Note) -> Bool {
         generator.phase == .idle
             && !recorder.isRecording
+            && !recorder.isFinishing
             && (current.recordingFileName != nil || current.transcript != nil)
     }
 
@@ -767,9 +852,22 @@ struct NoteEditorView: View {
     private func beginRecording() {
         player.stop()
         Task {
+            if AppSettings.liveTranscriptionEnabled {
+                let userName = (UserDefaults.standard.string(forKey: AppSettings.userNameKey) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                await live.start(userName: userName)
+                if live.isActive {
+                    recorder.liveTranscriber = live
+                } else if let message = live.failureMessage {
+                    // Live is garnish: the recording still happens, post-hoc
+                    // transcription covers for it.
+                    notifier.showToast(message)
+                }
+            }
             do {
                 try await recorder.start(destination: store.recordingDestination(for: noteId))
             } catch {
+                live.abort()
                 localError = error.localizedDescription
             }
         }
@@ -831,6 +929,7 @@ struct NoteEditorView: View {
     private func stopRecording() {
         RecordingCommand.stop(
             recorder: recorder,
+            live: live,
             store: store,
             generator: generator,
             notifier: notifier

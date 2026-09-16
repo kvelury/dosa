@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var recorder: AudioRecorder
+    @EnvironmentObject private var live: LiveTranscriber
     @EnvironmentObject private var notifier: NotificationManager
     @EnvironmentObject private var calendar: GoogleCalendarManager
     @EnvironmentObject private var updater: UpdateManager
@@ -116,14 +117,32 @@ struct ContentView: View {
             guard let interruption else { return }
             recorder.interruption = nil
             if let recovered = interruption.recovered {
-                store.setRecording(
-                    noteId: recovered.noteId,
-                    fileName: recovered.fileName,
-                    duration: recovered.duration
-                )
-                appState.selectedNoteIds = [recovered.noteId]
+                // Salvaged audio keeps its salvaged live transcript too — same
+                // save-before-setRecording order as the normal stop path.
+                Task {
+                    if let transcript = await live.finishIfActive(),
+                       var note = store.note(id: recovered.noteId) {
+                        note.transcript = transcript
+                        store.update(note)
+                    }
+                    store.setRecording(
+                        noteId: recovered.noteId,
+                        fileName: recovered.fileName,
+                        duration: recovered.duration
+                    )
+                    appState.selectedNoteIds = [recovered.noteId]
+                }
+            } else {
+                live.abort()
             }
             interruptionMessage = interruption.message
+        }
+        // A live pipeline that dies mid-recording announces itself once; the
+        // recording is unaffected and falls back to post-hoc transcription.
+        .onChange(of: live.failureMessage) { _, message in
+            guard let message, recorder.isRecording else { return }
+            live.failureMessage = nil
+            notifier.showToast(message)
         }
         .onChange(of: notifier.pendingOpenNoteId) { _, id in
             guard let id else { return }

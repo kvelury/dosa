@@ -5,6 +5,7 @@ struct MenuBarMenu: View {
     @EnvironmentObject private var store: NotesStore
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var recorder: AudioRecorder
+    @EnvironmentObject private var live: LiveTranscriber
     @EnvironmentObject private var generator: GenerationManager
     @EnvironmentObject private var notifier: NotificationManager
     @EnvironmentObject private var updater: UpdateManager
@@ -18,6 +19,7 @@ struct MenuBarMenu: View {
             Button("Stop Recording") {
                 RecordingCommand.stop(
                     recorder: recorder,
+                    live: live,
                     store: store,
                     generator: generator,
                     notifier: notifier

@@ -19,6 +19,11 @@ import CoreGraphics
 /// deleted until its replacement has been written successfully.
 final class AudioRecorder: NSObject, ObservableObject {
     @Published var isRecording = false
+    /// True from the moment Stop is pressed until the mixed recording is on disk.
+    /// The mixdown takes seconds on a long meeting, and without this the record
+    /// button would spring back to its "start recording" state — clickable —
+    /// while the audio it would overwrite is still being written.
+    @Published private(set) var isFinishing = false
     @Published var elapsed: TimeInterval = 0
     @Published var recordingNoteId: UUID?
     /// Rolling window of recent audio levels (0-1), newest last — drives the
@@ -70,6 +75,11 @@ final class AudioRecorder: NSObject, ObservableObject {
         let fileName: String
         let duration: TimeInterval
     }
+
+    /// Set by the start path when live mode is on; receives every captured buffer
+    /// on `sampleQueue`. Purely best-effort — nothing in the capture path may
+    /// fail because of it.
+    var liveTranscriber: LiveTranscriber?
 
     private var stream: SCStream?
     private var micEngine: AVAudioEngine?
@@ -210,76 +220,110 @@ final class AudioRecorder: NSObject, ObservableObject {
         return count > 0 ? sqrt(sum / Float(count)) : 0
     }
 
-    /// Stops recording and writes the mixed `.m4a` to the destination. Each source is
-    /// also kept as its own `.m4a` — transcribing them separately is what lets
-    /// on-device transcription attribute speech to the user vs. everyone else.
-    func stop() async throws -> Recording {
-        guard let destination, claimSession() else {
-            throw RecorderError.exportFailed("This recording has already finished.")
-        }
-        let duration = try await finish(destination: destination)
+    /// The synchronous half of stopping: claims the session and flips every piece
+    /// of recording UI in the caller's own runloop turn, so the saving spinner is
+    /// on screen the frame after the click. Returns nil when there is nothing to
+    /// stop — a second click, or a capture that already died on its own — in which
+    /// case the caller simply does nothing.
+    ///
+    /// Split out from the async work because the UI used to flip inside it: on a
+    /// busy Mac (live transcription tearing down, mixdown starting) those actor
+    /// hops queued behind real work and the recording looked like it kept going
+    /// for seconds after Stop.
+    @MainActor
+    func beginStop() -> Destination? {
+        guard let destination, claimSession() else { return nil }
+        markStopped()
+        return destination
+    }
+
+    /// The async half: tears the capture down and writes the mixed `.m4a`. Each
+    /// source is also kept as its own `.m4a` — transcribing them separately is
+    /// what lets on-device transcription attribute speech to the user vs. everyone
+    /// else. Caller must have won `beginStop()` first.
+    func completeStop(destination: Destination) async throws -> Recording {
+        let duration = try await teardownAndMix(destination: destination)
         return Recording(noteId: destination.noteId, fileName: destination.fileName, duration: duration)
     }
 
+    /// Everything that visibly ends a recording, in one synchronous main-actor
+    /// step. The capture itself is torn down moments later in `teardownAndMix`,
+    /// deliberately — stopping the streams is what could clip the last word, and
+    /// the UI should not wait on it.
+    @MainActor
+    private func markStopped() {
+        timer?.invalidate()
+        timer = nil
+        levelTimer?.invalidate()
+        levelTimer = nil
+        ringTimer?.invalidate()
+        ringTimer = nil
+        ringPhase = 0
+        isRecording = false
+        isFinishing = true
+        levelHistory = Self.emptyLevels
+    }
+
     /// Tears the capture down, mixes what was captured, and clears the scratch files.
-    /// The caller must already have won `claimSession()`.
-    private func finish(destination: Destination) async throws -> TimeInterval {
-        await MainActor.run {
-            self.timer?.invalidate()
-            self.timer = nil
-            self.levelTimer?.invalidate()
-            self.levelTimer = nil
-            self.ringTimer?.invalidate()
-            self.ringTimer = nil
-            self.ringPhase = 0
-            self.isRecording = false
-            self.levelHistory = Self.emptyLevels
-        }
-
-        micEngine?.inputNode.removeTap(onBus: 0)
-        micEngine?.stop()
-        micEngine = nil
-        if let stream {
-            try? await stream.stopCapture()
-        }
-        stream = nil
-
-        // Close both files on the sample queue so pending writes flush first.
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            sampleQueue.async {
-                self.micFile = nil
-                self.systemFile = nil
-                continuation.resume()
+    /// The caller must already have won the session and called `markStopped()`.
+    private func teardownAndMix(destination: Destination) async throws -> TimeInterval {
+        do {
+            micEngine?.inputNode.removeTap(onBus: 0)
+            micEngine?.stop()
+            micEngine = nil
+            if let stream {
+                try? await stream.stopCapture()
             }
+            stream = nil
+
+            // Close both files on the sample queue so pending writes flush first.
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                sampleQueue.async {
+                    self.micFile = nil
+                    self.systemFile = nil
+                    continuation.resume()
+                }
+            }
+
+            let duration = try await Self.mix(
+                inputs: [destination.micScratch, destination.systemScratch],
+                to: destination.output
+            )
+
+            // Best-effort: a failed side track only costs speaker attribution, so
+            // it must never fail the recording itself.
+            _ = try? await Self.mix(inputs: [destination.micScratch], to: destination.micTrack)
+            _ = try? await Self.mix(inputs: [destination.systemScratch], to: destination.systemTrack)
+
+            // Only now that the mix is safely on disk is the raw capture disposable.
+            try? FileManager.default.removeItem(at: destination.micScratch)
+            try? FileManager.default.removeItem(at: destination.systemScratch)
+
+            await MainActor.run {
+                self.recordingNoteId = nil
+                self.destination = nil
+                self.isFinishing = false
+            }
+            liveTranscriber = nil
+            return duration
+        } catch {
+            // A failed mixdown leaves the scratch audio in place (see `mix`), but
+            // the UI must not stay stuck showing a saving spinner.
+            await MainActor.run { self.isFinishing = false }
+            throw error
         }
-
-        let duration = try await Self.mix(
-            inputs: [destination.micScratch, destination.systemScratch],
-            to: destination.output
-        )
-
-        // Best-effort: a failed side track only costs speaker attribution, so
-        // it must never fail the recording itself.
-        _ = try? await Self.mix(inputs: [destination.micScratch], to: destination.micTrack)
-        _ = try? await Self.mix(inputs: [destination.systemScratch], to: destination.systemTrack)
-
-        // Only now that the mix is safely on disk is the raw capture disposable.
-        try? FileManager.default.removeItem(at: destination.micScratch)
-        try? FileManager.default.removeItem(at: destination.systemScratch)
-
-        await MainActor.run {
-            self.recordingNoteId = nil
-            self.destination = nil
-        }
-        return duration
     }
 
     /// Called when the capture dies without the user asking it to. Salvages whatever
     /// was recorded rather than leaving the user with nothing.
+    ///
+    /// Claims the session itself rather than going through `beginStop()`: this
+    /// races the user's Stop click, and whichever path claims first owns finishing.
     private func handleUnexpectedStop(message: String) {
         guard let destination, claimSession() else { return }
         Task {
-            let duration = try? await finish(destination: destination)
+            await MainActor.run { self.markStopped() }
+            let duration = try? await teardownAndMix(destination: destination)
             let recovered = duration.map {
                 RecoveredRecording(noteId: destination.noteId, fileName: destination.fileName, duration: $0)
             }
@@ -301,6 +345,7 @@ final class AudioRecorder: NSObject, ObservableObject {
             self.sampleQueue.async {
                 try? self.micFile?.write(from: buffer)
                 self.registerLevel(rms: rms)
+                self.liveTranscriber?.ingestMic(buffer)
             }
         }
         engine.prepare()
@@ -331,6 +376,7 @@ final class AudioRecorder: NSObject, ObservableObject {
     }
 
     private func teardownCapture() {
+        liveTranscriber = nil
         micEngine?.inputNode.removeTap(onBus: 0)
         micEngine?.stop()
         micEngine = nil
@@ -458,6 +504,9 @@ extension AudioRecorder: SCStreamDelegate, SCStreamOutput {
                 guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: bufferList.unsafePointer) else { return }
                 try file.write(from: pcmBuffer)
                 registerLevel(rms: Self.rms(of: pcmBuffer))
+                // Must run synchronously: pcmBuffer borrows the sample buffer's
+                // memory, and ingest copies it out via its format conversion.
+                liveTranscriber?.ingestSystem(pcmBuffer)
             }
         } catch {
             // Drop the buffer; a single failed write shouldn't kill the recording.

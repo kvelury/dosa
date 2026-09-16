@@ -22,8 +22,10 @@ import AVFoundation
 /// still can't be told apart — they share the system-audio track.
 enum AppleTranscriber {
 
-    /// One transcript line: text plus when it starts, in seconds.
-    private typealias Line = (text: String, start: TimeInterval)
+    /// One transcript line: text plus when it starts, in seconds. Internal so
+    /// LiveTranscriber can share `isEcho`/`mmss` instead of duplicating them.
+    typealias TranscriptLine = (text: String, start: TimeInterval)
+    private typealias Line = TranscriptLine
 
     static let othersLabel = "Others"
 
@@ -460,7 +462,7 @@ enum AppleTranscriber {
 
     /// True when a mic line looks like bleed of a nearby system-audio line —
     /// same moment, largely the same words.
-    private static func isEcho(_ line: Line, of systemLines: [Line]) -> Bool {
+    static func isEcho(_ line: TranscriptLine, of systemLines: [TranscriptLine]) -> Bool {
         let words = tokens(line.text)
         guard !words.isEmpty else { return false }
         for candidate in systemLines where abs(candidate.start - line.start) <= 3 {
@@ -481,7 +483,7 @@ enum AppleTranscriber {
         )
     }
 
-    private static func mmss(_ seconds: TimeInterval) -> String {
+    static func mmss(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%02d:%02d", total / 60, total % 60)
     }

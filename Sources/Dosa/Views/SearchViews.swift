@@ -49,6 +49,7 @@ struct GlobalSearchView: View {
         .frame(width: 640, height: 540)
         .appFontScope()
         .onAppear { searchFocused = true }
+        .dismissesOnOutsideClick()
     }
 
     @ViewBuilder
