@@ -5,6 +5,7 @@ enum AppSettings {
     static let userNameKey = "userName"
     static let appearanceKey = "appearanceMode"
     static let verbosityKey = "notesVerbosity"
+    static let actionItemsKey = "actionItemsEnabled"      // Bool, default true
     static let dosaColorKey = "dosaNotesColor"
     static let themeKey = "themeName"
     static let accentOverrideKey = "accentOverride"
@@ -383,6 +384,28 @@ enum AppSettings {
         default:
             return "Succinct and to the point. Crisp, short bullets with no filler; include every important point, decision, and action item, but keep each one brief."
         }
+    }
+
+    /// On unless the user has switched it off; an unset key means on.
+    static var actionItemsEnabled: Bool { bool(forKey: actionItemsKey, default: true) }
+
+    /// Appended to the template context so it reaches the prompt even when the
+    /// user has a customized notes prompt (see GenerationManager.withTemplateContext).
+    /// It states that it overrides any section list or length setting above it.
+    static func actionItemsInstruction(enabled: Bool) -> String {
+        if enabled {
+            return """
+            Action items: list only concrete commitments someone made or was assigned. One line each, \
+            formatted "- [ ] **Owner** — task (due date if one was stated)", roughly 15 words at most, with \
+            no supporting context and no sub-bullets. This format applies whatever the length setting says.
+            """
+        }
+        return """
+        Action items are turned off. Do not include an Action Items, Follow-ups, Next Steps, or To-dos \
+        section, or any other task section, and do not put checkbox lists or to-dos inside other sections. \
+        This overrides the section list above and any other mention of action items. The one exception is \
+        action items the user wrote in their own manual notes: keep those lines verbatim (rule 1).
+        """
     }
 
     static var currentVerbosity: Int {

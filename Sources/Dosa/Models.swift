@@ -38,7 +38,11 @@ struct Note: Identifiable, Codable, Hashable {
     /// never filled in from lines they actually wrote, and keeps the note readable
     /// after the template is edited or deleted.
     var templateSeed: String?
+    /// Per-note choice: also put the raw transcript in this note's Notion page, as
+    /// a toggle section. Optional so older store.json files still decode.
+    var includeTranscriptInNotion: Bool?
 
+    var exportsTranscriptToNotion: Bool { includeTranscriptInNotion ?? false }
     var isPinned: Bool { pinnedAt != nil }
     var isDeleted: Bool { deletedAt != nil }
     var displayTitle: String {

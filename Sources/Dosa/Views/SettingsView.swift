@@ -22,6 +22,7 @@ private struct SettingsSnapshot: Codable {
     var transcriptPrompt: String?
     var notificationsEnabled: Bool?
     var automaticMode: Bool?
+    var actionItemsEnabled: Bool?
     var noteTemplates: [NoteTemplate]?
 }
 
@@ -39,6 +40,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.userNameKey) private var userName = ""
     @AppStorage(AppSettings.appearanceKey) private var appearance = "auto"
     @AppStorage(AppSettings.verbosityKey) private var verbosity = AppSettings.defaultVerbosity
+    @AppStorage(AppSettings.actionItemsKey) private var actionItems = true
     @AppStorage(AppSettings.dosaColorKey) private var dosaColor = "Theme Default"
     @AppStorage(AppSettings.themeKey) private var themeName = "Classic"
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
@@ -809,10 +811,11 @@ struct SettingsView: View {
                     // writes the same key — the two are meant to be the same control.
                     NotesStyleSlider(level: $verbosity)
                         .padding(.vertical, 4)
+                    Toggle("Include action items", isOn: $actionItems)
                 } header: {
                     sectionHeader("Notes Style: \(AppSettings.verbosityLevelNames[min(max(verbosity, 0), 4)])")
                 } footer: {
-                    Text("Controls how succinct or detailed generated notes are. Fills the {{verbosity}} placeholder in the prompt below.")
+                    Text("Controls how succinct or detailed generated notes are. Fills the {{verbosity}} placeholder in the prompt below. Action items, when on, are kept to one short line each; when off, no action item or follow-up sections are written (lines you typed yourself are kept).")
                         .appFont(.caption)
                         .foregroundStyle(Theme.tertiaryTextColor)
                         .multilineTextAlignment(.leading)
@@ -1214,6 +1217,7 @@ struct SettingsView: View {
             transcriptPrompt: transcriptPrompt,
             notificationsEnabled: notificationsEnabled,
             automaticMode: automaticMode,
+            actionItemsEnabled: actionItems,
             noteTemplates: templates.templates
         )
         do {
@@ -1264,6 +1268,7 @@ struct SettingsView: View {
             if let value = snapshot.transcriptPrompt { transcriptPrompt = value }
             if let value = snapshot.notificationsEnabled { notificationsEnabled = value }
             if let value = snapshot.automaticMode { automaticMode = value }
+            if let value = snapshot.actionItemsEnabled { actionItems = value }
             // No `!value.isEmpty` guard: with built-ins deletable, "no templates" is a
             // state worth exporting and restoring. Older JSON without the field decodes
             // to nil and is still skipped.

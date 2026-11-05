@@ -10,6 +10,7 @@ import SwiftUI
 struct QuickSettingsPanel: View {
     @AppStorage(AppSettings.verbosityKey) private var verbosity = AppSettings.defaultVerbosity
     @AppStorage(AppSettings.llmProviderKey) private var llmProvider = "Gemini"
+    @AppStorage(AppSettings.actionItemsKey) private var actionItems = true
 
     // The model keys are bound so the label re-renders when a selection lands.
     // The *writes* go through AppSettings.selectModel, which also moves
@@ -58,6 +59,7 @@ struct QuickSettingsPanel: View {
         VStack(alignment: .leading, spacing: 16) {
             modelRow
             notesStyleRow
+            actionItemsRow
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
@@ -132,6 +134,22 @@ struct QuickSettingsPanel: View {
         .help("Model used to generate notes. Picking one also makes its provider the default.")
         .accessibilityLabel("Model, \(activeModel)")
         .accessibilityHint("Picking one also makes its provider the default")
+    }
+
+    private var actionItemsRow: some View {
+        HStack(spacing: 10) {
+            Text("Action Items")
+                .appFont(size: 13, weight: .medium)
+                .foregroundStyle(Theme.secondaryTextColor)
+            Spacer(minLength: 8)
+            Toggle("Action Items", isOn: $actionItems)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .cursor(.pointingHand)
+        }
+        .help("Include a short action items list in generated notes")
+        .accessibilityElement(children: .combine)
     }
 
     private var notesStyleRow: some View {

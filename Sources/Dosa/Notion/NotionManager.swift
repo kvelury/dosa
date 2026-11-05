@@ -166,11 +166,7 @@ final class NotionManager: ObservableObject {
         defer { exportingNoteId = nil }
         clearError()
 
-        let content = """
-        *\(note.createdAt.formatted(date: .long, time: .omitted))*
-
-        \(note.enhancedMarkdown ?? note.manualText)
-        """
+        let content = Self.pageContent(for: note)
 
         do {
             if let pageId = note.notionPageId {
@@ -201,6 +197,31 @@ final class NotionManager: ObservableObject {
             setError(error)
             return false
         }
+    }
+
+    /// The Notion-flavored Markdown body of the exported page. When the note opts in,
+    /// the raw transcript follows the notes inside a collapsed toggle. Notion's spec
+    /// says raw HTML like <details> is saved as literal text, so this uses its
+    /// `<toggle heading>` tag, whose children follow a blank line as plain Markdown.
+    static func pageContent(for note: Note) -> String {
+        var content = """
+        *\(note.createdAt.formatted(date: .long, time: .omitted))*
+
+        \(note.enhancedMarkdown ?? note.manualText)
+        """
+        guard note.exportsTranscriptToNotion, let transcript = note.transcript else { return content }
+        // One paragraph per transcript line. Literal "<" is escaped so transcript
+        // text can never be read as a Notion tag (and close the toggle early).
+        let paragraphs = transcript
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { $0.replacingOccurrences(of: "<", with: "\\<") }
+        guard !paragraphs.isEmpty else { return content }
+        content += "\n\n---\n\n<toggle heading=\"h2\">\nTranscript\n\n"
+        content += paragraphs.joined(separator: "\n\n")
+        content += "\n</toggle>"
+        return content
     }
 
     private func createPage(destination: Destination, note: Note, content: String) async throws -> (String, String?) {
