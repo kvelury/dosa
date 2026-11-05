@@ -458,6 +458,12 @@ final class NotesStore: ObservableObject {
         update(note)
     }
 
+    func setIncludeTranscriptInNotion(noteId: UUID, _ on: Bool) {
+        guard var note = note(id: noteId) else { return }
+        note.includeTranscriptInNotion = on
+        update(note)
+    }
+
     func discardRecording(_ id: UUID) {
         guard var note = note(id: id) else { return }
         removeRecordingFiles(for: note, includingHistory: false)

@@ -730,6 +730,16 @@ struct NoteEditorView: View {
             .help(notion.canExport
                   ? "Send this note to your configured Notion destination"
                   : "Connect Notion and choose a destination in Settings first")
+            Toggle(isOn: Binding(
+                get: { current.exportsTranscriptToNotion },
+                set: { store.setIncludeTranscriptInNotion(noteId: noteId, $0) }
+            )) {
+                Label("Include Transcript in Notion", systemImage: "text.bubble")
+            }
+            .disabled(current.transcript == nil || !notion.canExport)
+            .help(current.transcript == nil
+                  ? "The transcript appears after you generate notes"
+                  : "Adds the raw transcript to this note's Notion page as a toggle section, the next time you export or update")
             if let urlString = current.notionPageURL, let notionURL = URL(string: urlString) {
                 Button {
                     NSWorkspace.shared.open(notionURL)

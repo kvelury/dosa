@@ -210,6 +210,7 @@ final class GenerationManager: ObservableObject {
                 forKey: AppSettings.notesPromptKey, default: AppSettings.defaultNotesPrompt
             )
             let templateContext = TemplateStore.shared.promptContext(for: latest)
+                + "\n\n" + AppSettings.actionItemsInstruction(enabled: AppSettings.actionItemsEnabled)
             let prompt = withTemplateContext(template, context: templateContext)
                 .replacingOccurrences(of: "{{template_context}}", with: templateContext)
                 .replacingOccurrences(of: "{{verbosity}}", with: AppSettings.verbosityInstruction(level: AppSettings.currentVerbosity))
