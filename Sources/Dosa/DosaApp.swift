@@ -60,7 +60,6 @@ public struct DosaApp: App {
     static let mainWindowID = "main"
 
     @StateObject private var store = NotesStore()
-    @StateObject private var templates = TemplateStore.shared
     @StateObject private var recorder = AudioRecorder()
     @StateObject private var live = LiveTranscriber()
     @StateObject private var player = AudioPlayer()
@@ -72,7 +71,11 @@ public struct DosaApp: App {
     @StateObject private var notifier = NotificationManager()
     @StateObject private var updater = UpdateManager()
 
-    public init() {}
+    public init() {
+        // Note templates were retired in favor of Interview mode; drop what older
+        // builds stored. A no-op once the key is gone.
+        UserDefaults.standard.removeObject(forKey: AppSettings.noteTemplatesKey)
+    }
 
     /// One Format-menu row. Disabled unless a note editor has focus, so the
     /// shortcut can't fire into a text field or the note list.
@@ -92,7 +95,6 @@ public struct DosaApp: App {
         Window("Dosa", id: Self.mainWindowID) {
             ContentView()
                 .environmentObject(store)
-                .environmentObject(templates)
                 .environmentObject(recorder)
                 .environmentObject(live)
                 .environmentObject(player)
@@ -180,7 +182,6 @@ public struct DosaApp: App {
         MenuBarExtra {
             MenuBarMenu()
                 .environmentObject(store)
-                .environmentObject(templates)
                 .environmentObject(appState)
                 .environmentObject(recorder)
                 .environmentObject(live)

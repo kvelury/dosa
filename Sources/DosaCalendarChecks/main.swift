@@ -5,6 +5,7 @@ import Foundation
 enum DosaCalendarChecks {
     static func main() {
         let failures = CalendarSelfChecks.run() + TypographySelfChecks.run() + ContrastSelfChecks.run() + MarkdownFormattingSelfChecks.run()
+            + InterviewSelfChecks.run()
         if failures > 0 {
             fputs("\(failures) check(s) failed.\n", stderr)
             exit(1)

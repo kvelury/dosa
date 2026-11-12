@@ -95,27 +95,49 @@ final class NotesStore: ObservableObject {
     }
 
     @discardableResult
-    func createNote(in folderId: UUID? = nil, title: String = "", template: NoteTemplate? = nil) -> Note {
-        var note = Note(title: title, folderId: folderId)
-        if let template {
-            note.title = title.isEmpty ? template.name : title
-            note.manualText = template.body
-            note.templateId = template.id
-            note.templateName = template.name
-            note.templateSeed = template.body
-        }
+    func createNote(in folderId: UUID? = nil, title: String = "") -> Note {
+        let note = Note(title: title, folderId: folderId)
         notes.insert(note, at: 0)
         scheduleSave()
         return note
     }
 
-    func applyTemplate(_ template: NoteTemplate, to id: UUID) {
-        guard var note = note(id: id) else { return }
-        note.templateId = template.id
-        note.templateName = template.name
-        note.templateSeed = template.body
-        let trimmed = note.manualText.trimmingCharacters(in: .whitespacesAndNewlines)
-        note.manualText = trimmed.isEmpty ? template.body : note.manualText + "\n\n" + template.body
+    // MARK: - Interview mode
+
+    /// ＋▾ → New Interview…: a fresh note already in Interview mode, its editor
+    /// seeded with the extracted questions.
+    @discardableResult
+    func createInterviewNote(in folderId: UUID? = nil, setup: InterviewSetup) -> Note {
+        var note = Note(folderId: folderId)
+        note.interview = setup
+        note.manualText = InterviewDocument.seededManualText(existing: "", questions: setup.questions)
+        notes.insert(note, at: 0)
+        scheduleSave()
+        return note
+    }
+
+    /// ⋯ → Switch to Interview Mode…. One-way, and only before Dosa notes exist:
+    /// the questions are appended below anything already written.
+    func convertToInterview(id: UUID, setup: InterviewSetup) {
+        guard var note = note(id: id), !note.isInterview, note.enhancedMarkdown == nil else { return }
+        note.interview = setup
+        note.manualText = InterviewDocument.seededManualText(existing: note.manualText, questions: setup.questions)
+        update(note)
+    }
+
+    /// ⋯ → Edit Interview Doc…: replaces the rubric only. The question headings
+    /// already in the editor are the user's to keep or change, so they stay.
+    func updateInterviewDoc(id: UUID, doc: String, fileName: String?) {
+        guard var note = note(id: id), var interview = note.interview, note.enhancedMarkdown == nil else { return }
+        interview.sourceDoc = doc
+        interview.sourceFileName = fileName
+        note.interview = interview
+        update(note)
+    }
+
+    func setIncludeScorecardInExport(noteId: UUID, _ on: Bool) {
+        guard var note = note(id: noteId) else { return }
+        note.includeScorecardInExport = on
         update(note)
     }
 
@@ -470,6 +492,8 @@ final class NotesStore: ObservableObject {
         note.recordingFileName = nil
         note.recordingDuration = nil
         note.transcript = nil
+        // The scorecard is scored from the transcript being discarded.
+        note.scorecardMarkdown = nil
         update(note)
     }
 

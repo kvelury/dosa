@@ -3,7 +3,6 @@ import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @EnvironmentObject private var store: NotesStore
-    @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var updater: UpdateManager
     @Binding var selectedNoteIds: Set<UUID>
@@ -14,6 +13,7 @@ struct SidebarView: View {
     @State private var confirmEmptyTrash = false
     @State private var pendingDeleteIds: Set<UUID> = []
     @State private var deletedNotesExpanded = false
+    @State private var showNewInterview = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,16 +62,8 @@ struct SidebarView: View {
                         Button("Import Audio or Video…") {
                             importIntoNewNote(folderId: nil)
                         }
-                        if !templates.templates.isEmpty {
-                            Divider()
-                            Section("Templates") {
-                                ForEach(templates.templates) { template in
-                                    Button(template.name) {
-                                        let note = store.createNote(template: template)
-                                        selectedNoteIds = [note.id]
-                                    }
-                                }
-                            }
+                        Button("New Interview…") {
+                            showNewInterview = true
                         }
                     } label: {
                         Image(systemName: "chevron.down")
@@ -85,8 +77,8 @@ struct SidebarView: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("New note from a template, or import audio")
-                    .accessibilityLabel("New note from template, or import audio")
+                    .help("New note, new interview, or import audio")
+                    .accessibilityLabel("New note, new interview, or import audio")
                 }
             }
             .buttonStyle(.borderless)
@@ -142,6 +134,12 @@ struct SidebarView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .sheet(isPresented: $showNewInterview) {
+            InterviewSetupSheet(mode: .create) { setup in
+                let note = store.createInterviewNote(setup: setup)
+                selectedNoteIds = [note.id]
+            }
         }
         .alert("New Folder", isPresented: $showNewFolderAlert) {
             TextField("Folder name", text: $newFolderName)

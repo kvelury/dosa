@@ -5,6 +5,7 @@ enum SearchField: String {
     case title = "Title"
     case manual = "My Notes"
     case enhanced = "Dosa Notes"
+    case scorecard = "Scorecard"
     case transcript = "Transcript"
 }
 
@@ -33,7 +34,7 @@ final class SearchCoordinator: ObservableObject {
 }
 
 enum SearchService {
-    static let allFields: Set<SearchField> = [.title, .manual, .enhanced, .transcript]
+    static let allFields: Set<SearchField> = [.title, .manual, .enhanced, .scorecard, .transcript]
 
     static func globalMatches(
         notes: [Note], query: String,
@@ -66,6 +67,9 @@ enum SearchService {
         }
         if fields.contains(.enhanced) {
             appendMatches(in: note.enhancedMarkdown, field: .enhanced, note: note, query: trimmed, maxPerField: maxPerField, into: &results)
+        }
+        if fields.contains(.scorecard) {
+            appendMatches(in: note.scorecardMarkdown, field: .scorecard, note: note, query: trimmed, maxPerField: maxPerField, into: &results)
         }
         if fields.contains(.transcript) {
             appendMatches(in: note.transcript, field: .transcript, note: note, query: trimmed, maxPerField: maxPerField, into: &results)

@@ -23,13 +23,11 @@ private struct SettingsSnapshot: Codable {
     var notificationsEnabled: Bool?
     var automaticMode: Bool?
     var actionItemsEnabled: Bool?
-    var noteTemplates: [NoteTemplate]?
 }
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appState: AppState
-    @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var notion: NotionManager
     @EnvironmentObject private var calendar: GoogleCalendarManager
     @EnvironmentObject private var notifier: NotificationManager
@@ -67,7 +65,6 @@ struct SettingsView: View {
     @State private var backupStatus: String?
     @State private var notesPromptExpanded = false
     @State private var transcriptPromptExpanded = false
-    @State private var expandedTemplateIds: Set<UUID> = []
     @State private var selectedTab = "Gemini"
     @State private var showingClientPasteSheet = false
     @State private var pastedClientJSON = ""
@@ -500,67 +497,6 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private var templatesSection: some View {
-        Section {
-            ForEach($templates.templates) { $template in
-                DisclosureGroup(isExpanded: templateExpanded(template.id)) {
-                    TextField("Name", text: $template.name)
-                    Text("Sections prefilled into a new note")
-                        .appFont(.caption)
-                        .foregroundStyle(Theme.tertiaryTextColor)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    TextEditor(text: $template.body)
-                        .appMonoFont(size: 11)
-                        .frame(height: 140)
-                    Text("What the AI is told about this note type")
-                        .appFont(.caption)
-                        .foregroundStyle(Theme.tertiaryTextColor)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    TextEditor(text: $template.promptContext)
-                        .appMonoFont(size: 11)
-                        .frame(height: 120)
-                    HStack {
-                        if template.builtInKey != nil {
-                            Button("Reset to Default") {
-                                templates.resetToDefault(id: template.id)
-                            }
-                        }
-                        Spacer()
-                        Button("Delete", role: .destructive) {
-                            templates.delete(id: template.id)
-                        }
-                    }
-                } label: {
-                    promptGroupLabel(template.name, isExpanded: templateExpanded(template.id))
-                }
-            }
-            HStack {
-                Button("Add Template") {
-                    let created = templates.add()
-                    expandedTemplateIds.insert(created.id)
-                }
-                Spacer()
-                Button("Restore Defaults") {
-                    templates.restoreDefaults()
-                }
-            }
-        } header: {
-            sectionHeader("Note Templates")
-        } footer: {
-            Text("Templates appear under Templates in the ＋ menu in the sidebar. Choosing one prefills the note with its sections and tells the AI what kind of conversation it is, so the generated notes match. {{user_name}} works inside a template's AI context. Any template can be deleted, built-in ones included — Restore Defaults brings the four shipped templates back. A template only sets structure and context: generated notes stay a factual record either way, and never score or pass judgement on a conversation.")
-                .appFont(.caption)
-                .foregroundStyle(Theme.tertiaryTextColor)
-                .multilineTextAlignment(.leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
     /// Shown on the tabs of providers that generate notes but can't take audio.
     @ViewBuilder
     private func textOnlyProviderNote(_ name: String) -> some View {
@@ -823,8 +759,6 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                templatesSection
-
                 Section {
                     DisclosureGroup(isExpanded: $notesPromptExpanded) {
                         TextEditor(text: $notesPrompt)
@@ -840,7 +774,7 @@ struct SettingsView: View {
                             }
                         }
                         if !notesPrompt.contains("{{template_context}}") {
-                            Text("Your customized prompt doesn't include `{{template_context}}` — template guidance will be added at the top of the prompt instead. Reset to Default to place it inline.")
+                            Text("Your customized prompt doesn't include `{{template_context}}` — note-type guidance (including Interview mode's) will be added at the top of the prompt instead. Reset to Default to place it inline.")
                                 .appFont(.caption)
                                 .foregroundStyle(Theme.tertiaryTextColor)
                                 .multilineTextAlignment(.leading)
@@ -1150,18 +1084,6 @@ struct SettingsView: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
-    private func templateExpanded(_ id: UUID) -> Binding<Bool> {
-        Binding(
-            get: { expandedTemplateIds.contains(id) },
-            set: { expanded in
-                if expanded {
-                    expandedTemplateIds.insert(id)
-                } else {
-                    expandedTemplateIds.remove(id)
-                }
-            }
-        )
-    }
 
     /// Grouped-Form section headers derive their smaller, heavier look from the
     /// default text style — once `appFontScope` sets an explicit environment font
@@ -1217,8 +1139,7 @@ struct SettingsView: View {
             transcriptPrompt: transcriptPrompt,
             notificationsEnabled: notificationsEnabled,
             automaticMode: automaticMode,
-            actionItemsEnabled: actionItems,
-            noteTemplates: templates.templates
+            actionItemsEnabled: actionItems
         )
         do {
             let encoder = JSONEncoder()
@@ -1269,10 +1190,6 @@ struct SettingsView: View {
             if let value = snapshot.notificationsEnabled { notificationsEnabled = value }
             if let value = snapshot.automaticMode { automaticMode = value }
             if let value = snapshot.actionItemsEnabled { actionItems = value }
-            // No `!value.isEmpty` guard: with built-ins deletable, "no templates" is a
-            // state worth exporting and restoring. Older JSON without the field decodes
-            // to nil and is still skipped.
-            if let value = snapshot.noteTemplates { templates.templates = value }
             AppSettings.applyAppearance()
             backupStatus = "Settings imported from \(url.lastPathComponent)."
         } catch {

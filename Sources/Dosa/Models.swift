@@ -32,23 +32,40 @@ struct Note: Identifiable, Codable, Hashable {
     /// note, for the editor header's sparkle pill hover card.
     var generationModel: String?
     var generationStyle: String?
-    var templateId: UUID?
-    var templateName: String?
-    /// The template body as it was when applied. Lets generation tell scaffolding the user
-    /// never filled in from lines they actually wrote, and keeps the note readable
-    /// after the template is edited or deleted.
-    var templateSeed: String?
+    /// Non-nil once the note is in Interview mode: the questions/rubric doc the
+    /// user supplied before the interview. Optional so older store.json files
+    /// still decode (and the retired template fields they may carry are ignored).
+    var interview: InterviewSetup?
+    /// Dosa's per-question score of the candidate against the interview doc's
+    /// rubric. Only ever set on interview notes; editable like the Dosa notes.
+    var scorecardMarkdown: String?
+    /// Per-note choice: append the scorecard to Export Notes and the Notion page.
+    var includeScorecardInExport: Bool?
     /// Per-note choice: also put the raw transcript in this note's Notion page, as
     /// a toggle section. Optional so older store.json files still decode.
     var includeTranscriptInNotion: Bool?
 
     var exportsTranscriptToNotion: Bool { includeTranscriptInNotion ?? false }
+    var exportsScorecard: Bool { includeScorecardInExport ?? false }
+    var isInterview: Bool { interview != nil }
     var isPinned: Bool { pinnedAt != nil }
     var isDeleted: Bool { deletedAt != nil }
     var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Untitled Note" : trimmed
     }
+}
+
+/// What Interview mode carries on a note. Set up before the interview from a
+/// pasted or uploaded doc; the editor is seeded from `questions`, while
+/// `sourceDoc` is shown whole as the rubric and sent to the LLM.
+struct InterviewSetup: Codable, Hashable {
+    /// The full pasted/uploaded text — shown as the rubric, sent to the LLM.
+    var sourceDoc: String
+    /// For the side panel's header. Nil when the doc was pasted.
+    var sourceFileName: String?
+    /// Extracted at setup, in order; seeds the editor's question headings.
+    var questions: [String]
 }
 
 extension Note {

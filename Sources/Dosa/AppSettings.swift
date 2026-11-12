@@ -111,6 +111,8 @@ enum AppSettings {
     static let anthropicModelKey = "anthropicModel"
     static let notesPromptKey = "notesPromptTemplate"
     static let transcriptPromptKey = "transcriptPromptTemplate"
+    /// Retired: note templates were replaced by Interview mode. Kept only so
+    /// `DosaApp.init` can delete the stored templates left by older builds.
     static let noteTemplatesKey = "noteTemplates"
 
     /// Providers with a working integration; anything else stored under
@@ -407,6 +409,56 @@ enum AppSettings {
         action items the user wrote in their own manual notes: keep those lines verbatim (rule 1).
         """
     }
+
+    /// The Interview-mode scorecard prompt. Deliberately code-owned rather than a
+    /// Settings field: the scoring rules (rubric's own scale only, a reason for
+    /// every unscored question, Overall only when the rubric defines one) are the
+    /// whole contract of the scorecard pane, and an edited prompt could quietly
+    /// drop them. Placeholders: {{user_name}}, {{title}}, {{date}},
+    /// {{interview_doc}}, {{manual_notes}}, {{transcript}}.
+    static let interviewScorecardPrompt = """
+    You are scoring a job interview against the interviewer's own rubric. {{user_name}} is the \
+    interviewer; the candidate is every other speaker in the transcript. Score only the candidate — \
+    never {{user_name}}.
+
+    Rules:
+    1. Use only the scale, criteria, and weights the interview document defines. Never invent a \
+    scale, criteria, or a score the rubric does not provide for.
+    2. Give one section per interview question, in the order the document lists them, formatted \
+    exactly like this:
+    ## Q1. <the question>
+    **Score:** <score on the rubric's scale, e.g. 3 / 4>
+    **Rationale:** <1-3 sentences tying the candidate's answer to the rubric's criteria>
+    **Evidence:** "<a short, verbatim quote from the candidate in the transcript>"
+    3. When a question cannot be scored, write "**Score:** Not scored" and give the specific reason \
+    under **Rationale:** — for example the question was not asked, the answer was unclear or \
+    inaudible in the transcript, or the rubric gives no criteria for this question. Omit \
+    **Evidence:** when there is nothing to quote.
+    4. Overall: ONLY if the interview document defines an overall score, total, or recommendation, \
+    put a "## Overall" section FIRST, before the questions, computed the way the rubric says (for \
+    example a weighted sum, or the recommendation tiers it lists), with a one-sentence rationale. If \
+    the document defines no overall score, do not include an Overall section at all.
+    5. Base every score on what the candidate actually said in the transcript. The interviewer's \
+    manual notes may help you locate answers, but are not evidence on their own. Never fabricate \
+    quotes, and never credit an answer the candidate did not give.
+    6. Output pure Markdown with no code fences and no preamble. Do not repeat the interview title \
+    or date. Use "-" for any bullet (never "*" or "+"). Never use italics, and never use a bare "*" \
+    in prose.
+
+    Interview title: {{title}}
+    Interview date: {{date}}
+
+    Interview document (questions and rubric):
+    ---
+    {{interview_doc}}
+    ---
+
+    Interviewer's manual notes:
+    {{manual_notes}}
+
+    Full transcript:
+    {{transcript}}
+    """
 
     static var currentVerbosity: Int {
         let defaults = UserDefaults.standard

@@ -200,14 +200,15 @@ final class NotionManager: ObservableObject {
     }
 
     /// The Notion-flavored Markdown body of the exported page. When the note opts in,
-    /// the raw transcript follows the notes inside a collapsed toggle. Notion's spec
+    /// Dosa's interview scorecard follows the notes, and the raw transcript follows
+    /// those inside a collapsed toggle. Notion's spec
     /// says raw HTML like <details> is saved as literal text, so this uses its
     /// `<toggle heading>` tag, whose children follow a blank line as plain Markdown.
     static func pageContent(for note: Note) -> String {
         var content = """
         *\(note.createdAt.formatted(date: .long, time: .omitted))*
 
-        \(note.enhancedMarkdown ?? note.manualText)
+        \(InterviewDocument.exportBody(for: note))
         """
         guard note.exportsTranscriptToNotion, let transcript = note.transcript else { return content }
         // One paragraph per transcript line. Literal "<" is escaped so transcript
