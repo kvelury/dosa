@@ -286,6 +286,19 @@ final class GenerationManager: ObservableObject {
     /// transcript, for an interview note whose notes generated but whose scoring
     /// failed (or that the user wants re-scored after editing the rubric).
     func runScoring(noteId: UUID, store: NotesStore, notifier: NotificationManager) async {
+        await performScoring(noteId: noteId, store: store, notifier: notifier)
+        // A recording that finished while scoring ran was queued by
+        // `enqueueAutomatic`, whose `drain` bailed on `phase != .idle`; nothing
+        // else would start it. `phase` is idle again here (the `defer` in
+        // `performScoring` has run). Stop means stop, as in `drain`.
+        guard !Task.isCancelled else {
+            queue.removeAll()
+            return
+        }
+        drain(store: store, notifier: notifier)
+    }
+
+    private func performScoring(noteId: UUID, store: NotesStore, notifier: NotificationManager) async {
         guard phase == .idle else { return }
         guard let note = store.note(id: noteId), note.isInterview else { return }
         if errorNoteId == noteId {
@@ -352,7 +365,10 @@ final class GenerationManager: ObservableObject {
         var scorecard = Self.stripCodeFence(try await generateText(prompt))
         scorecard = Self.normalizeBullets(scorecard)
         try Task.checkCancellation()
-        if var fresh = store.note(id: noteId) {
+        // Only save against the transcript that was scored. Discard Recording
+        // (or Re-transcribe) can clear or replace it while the call is in
+        // flight, and a scorecard of discarded audio must not come back.
+        if var fresh = store.note(id: noteId), fresh.transcript == transcript {
             fresh.scorecardMarkdown = scorecard
             store.update(fresh)
         }
