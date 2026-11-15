@@ -108,7 +108,8 @@ Sources/DosaApp/DosaEntry.swift      @main trampoline
 Sources/Dosa/                        DosaKit library
   DosaApp / AppSettings / Theme      app entry, settings registry, theming tokens
   Models / NotesStore                data model + debounced JSON persistence
-  NoteTemplates                      built-in and user note templates
+  NotePromptContext                  note-type guidance for the notes prompt
+  InterviewDocument                  Interview mode: doc reading, question extraction, export
   AudioRecorder / AudioPlayer        capture (mic + ScreenCaptureKit), mixdown, playback
   RecordingImporter                  file picker + format gate for imported audio/video
   GeminiClient / AnthropicClient /
@@ -141,5 +142,5 @@ Scripts/make_icon.swift              rasterizes Resources/Branding/*.svg into th
 - Ad-hoc signing means permission grants can reset on rebuild, and **on every in-app update** — there is no Developer ID / notarization. That re-prompt is expected; see [Updating](#updating).
 - Released builds are **arm64-only**. An Intel Mac will not be offered an update (the updater refuses an incompatible slice rather than installing a bundle that cannot launch).
 - Notion sync is one-way (export/update); bi-directional sync is designed but not built (see the design doc §10.4).
-- Google Calendar uses the REST API (not Google's preview MCP server). Sign-in needs a Desktop OAuth client added in Settings, and Google's verification before broad distribution. Creating a note from a meeting prefills only the title — it does not apply a template or copy calendar description/attendees into the note.
+- Google Calendar uses the REST API (not Google's preview MCP server). Sign-in needs a Desktop OAuth client added in Settings, and Google's verification before broad distribution. Creating a note from a meeting prefills only the title — it does not copy calendar description/attendees into the note.
 - The OpenAI provider tab in Settings is a stub; Gemini, Anthropic, and DeepSeek are the working providers.

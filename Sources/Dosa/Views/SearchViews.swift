@@ -36,7 +36,7 @@ struct GlobalSearchView: View {
             .padding()
 
             SearchFieldToggleRow(
-                fields: [.title, .transcript, .manual, .enhanced],
+                fields: [.title, .transcript, .manual, .enhanced, .scorecard],
                 enabledFields: $enabledFields
             )
             .padding(.horizontal)
@@ -105,7 +105,7 @@ struct NoteSearchView: View {
     let onDismiss: () -> Void
 
     @State private var query = ""
-    @State private var enabledFields: Set<SearchField> = [.transcript, .manual, .enhanced]
+    @State private var enabledFields: Set<SearchField> = [.transcript, .manual, .enhanced, .scorecard]
     @FocusState private var searchFocused: Bool
 
     private var trimmedQuery: String {
@@ -130,7 +130,7 @@ struct NoteSearchView: View {
             .padding(10)
 
             SearchFieldToggleRow(
-                fields: [.transcript, .manual, .enhanced],
+                fields: note.isInterview ? [.transcript, .manual, .enhanced, .scorecard] : [.transcript, .manual, .enhanced],
                 enabledFields: $enabledFields
             )
             .padding(.horizontal, 10)

@@ -734,3 +734,50 @@ private extension View {
         }
     }
 }
+
+/// Title row for one pane of a side-by-side editor layout (Interview mode),
+/// with a Copy button that puts the pane's Markdown on the clipboard. The
+/// accessory slot sits between the title and the button — the rubric panel puts
+/// its Rubric | Live Transcript switch there.
+struct PaneHeader<Accessory: View>: View {
+    let title: String
+    let systemImage: String
+    /// Read when the button is pressed, so it always copies the current text.
+    let copyText: () -> String
+    @ViewBuilder var accessory: () -> Accessory
+
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .appFont(.headline)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            accessory()
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(copyText(), forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+            } label: {
+                Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .appFont(.callout)
+            }
+            .buttonStyle(.borderless)
+            .cursor(.pointingHand)
+            .disabled(copyText().isEmpty)
+            .help("Copy \(title) as Markdown")
+            .accessibilityLabel("Copy \(title)")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+}
+
+extension PaneHeader where Accessory == EmptyView {
+    init(title: String, systemImage: String, copyText: @escaping () -> String) {
+        self.init(title: title, systemImage: systemImage, copyText: copyText, accessory: { EmptyView() })
+    }
+}

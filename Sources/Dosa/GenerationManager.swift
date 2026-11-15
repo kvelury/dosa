@@ -119,18 +119,7 @@ final class GenerationManager: ObservableObject {
             apiKey: geminiKey,
             model: AppSettings.transcriptionModel
         )
-        let generateText: (String) async throws -> String
-        switch provider {
-        case "Anthropic":
-            let client = AnthropicClient(apiKey: providerKey, model: providerModel)
-            generateText = { try await client.generateText(prompt: $0) }
-        case "DeepSeek":
-            let client = DeepSeekClient(apiKey: providerKey, model: providerModel)
-            generateText = { try await client.generateText(prompt: $0) }
-        default:
-            let client = GeminiClient(apiKey: providerKey, model: providerModel)
-            generateText = { try await client.generateText(prompt: $0) }
-        }
+        let generateText = Self.makeTextGenerator(provider: provider, apiKey: providerKey, model: providerModel)
 
         activeNoteId = noteId
         defer {
@@ -141,7 +130,7 @@ final class GenerationManager: ObservableObject {
 
         let userName = (UserDefaults.standard.string(forKey: AppSettings.userNameKey) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedName = userName.isEmpty ? "not provided (infer from the audio if possible)" : userName
+        let resolvedName = Self.resolvedUserName()
 
         do {
             var transcript = note.transcript
@@ -209,7 +198,7 @@ final class GenerationManager: ObservableObject {
             let template = AppSettings.string(
                 forKey: AppSettings.notesPromptKey, default: AppSettings.defaultNotesPrompt
             )
-            let templateContext = TemplateStore.shared.promptContext(for: latest)
+            let templateContext = NotePromptContext.context(for: latest)
                 + "\n\n" + AppSettings.actionItemsInstruction(enabled: AppSettings.actionItemsEnabled)
             let prompt = withTemplateContext(template, context: templateContext)
                 .replacingOccurrences(of: "{{template_context}}", with: templateContext)
@@ -242,20 +231,45 @@ final class GenerationManager: ObservableObject {
                 }
             }
 
-            if var fresh = store.note(id: noteId) {
-                fresh.enhancedMarkdown = markdown
-                if let generatedTitle, !generatedTitle.isEmpty,
-                   fresh.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    fresh.title = generatedTitle
-                }
-                fresh.generationModel = providerModel
-                fresh.generationStyle = AppSettings.verbosityLevelNames[AppSettings.currentVerbosity]
-                store.update(fresh)
-                notifier.post(.notesReady(noteId: noteId, title: fresh.displayTitle))
+            guard var fresh = store.note(id: noteId) else { return }
+            fresh.enhancedMarkdown = markdown
+            if let generatedTitle, !generatedTitle.isEmpty,
+               fresh.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                fresh.title = generatedTitle
             }
+            fresh.generationModel = providerModel
+            fresh.generationStyle = AppSettings.verbosityLevelNames[AppSettings.currentVerbosity]
+            // A regenerate must not leave the previous transcript's scorecard
+            // sitting next to the new notes if this run's scoring fails.
+            if fresh.isInterview { fresh.scorecardMarkdown = nil }
+            store.update(fresh)
+
+            // Interview mode: a second, separate call scores the candidate. Kept
+            // apart from the notes call so the notes keep their objectivity rule
+            // and the scoring instructions can't leak into them. The notes are
+            // already saved, so a scoring failure never costs the user them.
+            if fresh.isInterview {
+                do {
+                    try await score(
+                        noteId: noteId, transcript: transcript ?? "", resolvedName: resolvedName,
+                        store: store, generateText: generateText
+                    )
+                } catch {
+                    if Self.isCancellation(error) { return }
+                    fail(
+                        "Dosa generated the notes, but scoring them against the rubric failed: \(error.localizedDescription) Use Retry Scoring in the scorecard pane to try again.",
+                        detail: (error as? DetailedError)?.errorDetail,
+                        noteId: noteId,
+                        automatic: automatic,
+                        notifier: notifier,
+                        store: store
+                    )
+                    return
+                }
+            }
+            notifier.post(.notesReady(noteId: noteId, title: store.note(id: noteId)?.displayTitle ?? fresh.displayTitle))
         } catch {
-            let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
-            if !cancelled {
+            if !Self.isCancellation(error) {
                 fail(
                     error.localizedDescription,
                     detail: (error as? DetailedError)?.errorDetail,
@@ -266,6 +280,147 @@ final class GenerationManager: ObservableObject {
                 )
             }
         }
+    }
+
+    /// Retry Scoring: runs only the scorecard call, on the note's existing
+    /// transcript, for an interview note whose notes generated but whose scoring
+    /// failed (or that the user wants re-scored after editing the rubric).
+    func runScoring(noteId: UUID, store: NotesStore, notifier: NotificationManager) async {
+        await performScoring(noteId: noteId, store: store, notifier: notifier)
+        resumeQueue(store: store, notifier: notifier)
+    }
+
+    /// Generate Notes / Re-transcribe & Regenerate: a run someone started by
+    /// hand, followed by any automatic work that queued up behind it.
+    func runManual(noteId: UUID, store: NotesStore, notifier: NotificationManager) async {
+        await run(noteId: noteId, store: store, notifier: notifier)
+        resumeQueue(store: store, notifier: notifier)
+    }
+
+    /// Called when a run started outside `drain` (manual Generate, Retry
+    /// Scoring) finishes. A recording stopped meanwhile was queued by
+    /// `enqueueAutomatic`, whose `drain` bailed on `phase != .idle`, and
+    /// nothing else would start it. `phase` is idle again by now (the run's
+    /// `defer` has fired). Stop means stop, as in `drain`.
+    private func resumeQueue(store: NotesStore, notifier: NotificationManager) {
+        guard !Task.isCancelled else {
+            queue.removeAll()
+            return
+        }
+        drain(store: store, notifier: notifier)
+    }
+
+    private func performScoring(noteId: UUID, store: NotesStore, notifier: NotificationManager) async {
+        guard phase == .idle else { return }
+        guard let note = store.note(id: noteId), note.isInterview else { return }
+        if errorNoteId == noteId {
+            errorMessage = nil
+            errorDetail = nil
+            errorNoteId = nil
+        }
+        guard let transcript = note.transcript, !transcript.isEmpty else {
+            fail("There's no transcript to score yet — record the interview and generate notes first.",
+                 noteId: noteId, automatic: false, notifier: notifier, store: store)
+            return
+        }
+        let provider = AppSettings.currentProvider
+        let providerKey = AppSettings.storedAPIKey(for: provider)
+        guard !providerKey.isEmpty else {
+            fail(
+                "Add your \(provider) API key first — open Settings with the gear icon at the top of the sidebar.",
+                noteId: noteId, automatic: false, notifier: notifier, store: store
+            )
+            return
+        }
+        let generateText = Self.makeTextGenerator(
+            provider: provider, apiKey: providerKey, model: AppSettings.resolvedModel(for: provider)
+        )
+        activeNoteId = noteId
+        phase = .generating
+        defer {
+            phase = .idle
+            activeNoteId = nil
+        }
+        do {
+            try await score(
+                noteId: noteId, transcript: transcript, resolvedName: Self.resolvedUserName(),
+                store: store, generateText: generateText
+            )
+        } catch {
+            if !Self.isCancellation(error) {
+                fail(
+                    "Scoring against the rubric failed: \(error.localizedDescription)",
+                    detail: (error as? DetailedError)?.errorDetail,
+                    noteId: noteId, automatic: false, notifier: notifier, store: store
+                )
+            }
+        }
+    }
+
+    /// Builds and sends the scorecard prompt, then saves the result. Throws the
+    /// provider's error so each caller can phrase the failure for its context.
+    private func score(
+        noteId: UUID,
+        transcript: String,
+        resolvedName: String,
+        store: NotesStore,
+        generateText: (String) async throws -> String
+    ) async throws {
+        guard let note = store.note(id: noteId), let interview = note.interview else { return }
+        let prompt = AppSettings.interviewScorecardPrompt
+            .replacingOccurrences(of: "{{interview_doc}}", with: interview.sourceDoc)
+            .replacingOccurrences(of: "{{user_name}}", with: resolvedName)
+            .replacingOccurrences(of: "{{title}}", with: note.displayTitle)
+            .replacingOccurrences(of: "{{date}}", with: note.createdAt.formatted(date: .long, time: .omitted))
+            .replacingOccurrences(of: "{{manual_notes}}", with: note.manualText.isEmpty ? "(none)" : note.manualText)
+            .replacingOccurrences(of: "{{transcript}}", with: transcript)
+        var scorecard = Self.stripCodeFence(try await generateText(prompt))
+        scorecard = Self.normalizeBullets(scorecard)
+        try Task.checkCancellation()
+        // Only save against the transcript that was scored. Discard Recording
+        // (or Re-transcribe) can clear or replace it while the call is in
+        // flight, and a scorecard of discarded audio must not come back.
+        if var fresh = store.note(id: noteId), fresh.transcript == transcript {
+            fresh.scorecardMarkdown = scorecard
+            store.update(fresh)
+        }
+    }
+
+    /// The text-generation call for a provider, shared by note generation,
+    /// scoring, and Interview setup's question extraction.
+    nonisolated static func makeTextGenerator(
+        provider: String, apiKey: String, model: String
+    ) -> (String) async throws -> String {
+        switch provider {
+        case "Anthropic":
+            let client = AnthropicClient(apiKey: apiKey, model: model)
+            return { try await client.generateText(prompt: $0) }
+        case "DeepSeek":
+            let client = DeepSeekClient(apiKey: apiKey, model: model)
+            return { try await client.generateText(prompt: $0) }
+        default:
+            let client = GeminiClient(apiKey: apiKey, model: model)
+            return { try await client.generateText(prompt: $0) }
+        }
+    }
+
+    /// The default provider's generator, or nil when it has no API key — the
+    /// caller then skips the LLM step (Interview setup falls back to a heuristic).
+    nonisolated static func defaultTextGenerator() -> ((String) async throws -> String)? {
+        let provider = AppSettings.currentProvider
+        let key = AppSettings.storedAPIKey(for: provider)
+        guard !key.isEmpty else { return nil }
+        return makeTextGenerator(provider: provider, apiKey: key, model: AppSettings.resolvedModel(for: provider))
+    }
+
+    nonisolated private static func resolvedUserName() -> String {
+        let userName = (UserDefaults.standard.string(forKey: AppSettings.userNameKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return userName.isEmpty ? "not provided (infer from the audio if possible)" : userName
+    }
+
+    nonisolated private static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     /// The single error exit. Always stashes the message for the note's error
@@ -290,9 +445,10 @@ final class GenerationManager: ObservableObject {
         notifier.post(.notesFailed(noteId: noteId, title: title))
     }
 
-    /// Users who customized their prompt before templates existed have no
-    /// {{template_context}} placeholder in it; without this their templates would
-    /// silently steer nothing. Prepended rather than appended because appending would
+    /// Users who customized their prompt before the note-type placeholder existed
+    /// have no {{template_context}} in it; without this, the note-type guidance
+    /// (including Interview mode's question-by-question sections and interview
+    /// doc) would silently steer nothing. Prepended rather than appended because appending would
     /// bury the instruction behind a transcript that can run to tens of thousands of tokens.
     private func withTemplateContext(_ template: String, context: String) -> String {
         guard !template.contains("{{template_context}}") else { return template }

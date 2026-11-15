@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 
 struct NoteEditorView: View {
     @EnvironmentObject private var store: NotesStore
-    @EnvironmentObject private var templates: TemplateStore
     @EnvironmentObject private var recorder: AudioRecorder
     @EnvironmentObject private var live: LiveTranscriber
     @EnvironmentObject private var player: AudioPlayer
@@ -42,6 +41,8 @@ struct NoteEditorView: View {
     @AppStorage(AppSettings.accentOverrideKey) private var accentOverride = "Theme Default"
     @State private var editorHighlight: TextHighlight?
     @State private var transcriptHighlight: TextHighlight?
+    @State private var scorecardHighlight: TextHighlight?
+    @State private var interviewSheet: InterviewSetupSheet.Mode?
     @State private var showDatePicker = false
     @State private var showMeeting = false
     @AppStorage(AppSettings.liveTranscriptionKey) private var liveTranscription = false
@@ -114,6 +115,9 @@ struct NoteEditorView: View {
         }
         .sheet(isPresented: $showTranscript) {
             TranscriptView(note: current, highlight: transcriptHighlight)
+        }
+        .sheet(item: $interviewSheet) { mode in
+            interviewSetupSheet(mode: mode, current: current)
         }
         .confirmationDialog("Delete this note?", isPresented: $confirmDelete) {
             Button("Yes, Delete", role: .destructive) {
@@ -241,85 +245,179 @@ struct NoteEditorView: View {
 
     @ViewBuilder
     private func content(note: Binding<Note>, current: Note) -> some View {
-        if liveSplitActive {
+        if let interview = current.interview {
+            interviewContent(note: note, current: current, interview: interview)
+        } else if liveSplitActive {
             HSplitView {
-                VStack(alignment: .leading, spacing: 0) {
-                    topFormattingToolbar
-                    DosaMarkdownEditor(
-                        text: note.manualText,
-                        highlight: editorHighlight,
-                        bottomContentInset: Self.barBottomInset,
-                        documentId: "\(noteId)-manual",
-                        onMediaFileDrop: { requestAudio(.importFile($0)) },
-                        onMediaDragChanged: { isDropTargeted = $0 }
-                    )
-                    .accessibilityLabel("My notes, editable")
-                    .padding(.top, 2)
-                }
-                .frame(minWidth: 320)
-                .layoutPriority(1)
+                manualPane(note: note, current: current)
+                    .frame(minWidth: 320)
+                    .layoutPriority(1)
                 LiveTranscriptPane(live: live)
                     .frame(minWidth: 280, idealWidth: 360)
             }
         } else if viewMode == .aiNotes, current.enhancedMarkdown != nil {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 14) {
-                    Label("Your notes", systemImage: "circle.fill")
-                        .appFont(size: 13)
-                        .foregroundStyle(.primary)
-                    Label("Dosa additions", systemImage: "circle.fill")
-                        .appFont(size: 13)
-                        .foregroundStyle(DiffEngine.aiColor)
-                    Spacer()
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 7)
-                .padding(.bottom, 7)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Legend: your notes shown in the default color, Dosa's additions tinted")
-                topFormattingToolbar
-                DosaMarkdownEditor(
-                    text: enhancedBinding(note: note),
-                    diffAgainst: current.manualText,
-                    highlight: editorHighlight,
-                    bottomContentInset: Self.barBottomInset,
-                    documentId: "\(noteId)-enhanced",
-                    onMediaFileDrop: { requestAudio(.importFile($0)) },
-                    onMediaDragChanged: { isDropTargeted = $0 }
-                )
-                .accessibilityLabel("Dosa notes, editable")
+            enhancedPane(note: note, current: current)
+        } else {
+            manualPane(note: note, current: current)
+        }
+    }
+
+    /// Interview mode is always two panes. My Notes: the user's notes beside the
+    /// rubric (which also hosts the live transcript while recording live). Dosa
+    /// Notes: the generated notes beside Dosa's scorecard. Separate split views
+    /// per branch, so each side's pane pair is laid out on its own.
+    @ViewBuilder
+    private func interviewContent(note: Binding<Note>, current: Note, interview: InterviewSetup) -> some View {
+        if viewMode == .aiNotes, current.enhancedMarkdown != nil {
+            HSplitView {
+                enhancedPane(note: note, current: current, showsHeader: true)
+                    .frame(minWidth: 320)
+                    .layoutPriority(1)
+                scorecardPane(note: note, current: current)
+                    .frame(minWidth: 280, idealWidth: 380)
             }
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                if current.enhancedMarkdown != nil {
-                    HStack(spacing: 6) {
-                        Image(systemName: "lock")
-                            .font(.caption)
-                        Text("Read-only — Dosa has generated notes from these. Edit them in Dosa Notes.")
-                            .appFont(.caption)
-                        Spacer()
-                    }
-                    .foregroundStyle(Theme.secondaryTextColor)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 6)
-                    .accessibilityElement(children: .combine)
-                }
-                if current.enhancedMarkdown == nil {
-                    topFormattingToolbar
-                }
-                DosaMarkdownEditor(
-                    text: note.manualText,
-                    isEditable: current.enhancedMarkdown == nil,
-                    highlight: editorHighlight,
-                    bottomContentInset: Self.barBottomInset,
-                    documentId: "\(noteId)-manual",
-                    onMediaFileDrop: { requestAudio(.importFile($0)) },
-                    onMediaDragChanged: { isDropTargeted = $0 }
+            HSplitView {
+                manualPane(note: note, current: current, showsHeader: true)
+                    .frame(minWidth: 320)
+                    .layoutPriority(1)
+                InterviewSidePanel(
+                    interview: interview,
+                    noteId: noteId,
+                    live: live,
+                    showsLiveTab: liveSplitActive,
+                    bottomContentInset: Self.barBottomInset
                 )
-                .accessibilityLabel(current.enhancedMarkdown == nil ? "My notes, editable" : "My notes, read-only")
-                .padding(.top, 2)
+                .frame(minWidth: 280, idealWidth: 380)
             }
         }
+    }
+
+    /// The user's own notes: editable until Dosa generates notes from them,
+    /// read-only (with a banner saying so) afterwards.
+    private func manualPane(note: Binding<Note>, current: Note, showsHeader: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if showsHeader {
+                PaneHeader(
+                    title: "My Notes",
+                    systemImage: "square.and.pencil",
+                    copyText: { store.note(id: noteId)?.manualText ?? "" }
+                )
+                Divider()
+            }
+            if current.enhancedMarkdown != nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock")
+                        .font(.caption)
+                    Text("Read-only — Dosa has generated notes from these. Edit them in Dosa Notes.")
+                        .appFont(.caption)
+                    Spacer()
+                }
+                .foregroundStyle(Theme.secondaryTextColor)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 6)
+                .accessibilityElement(children: .combine)
+            }
+            if current.enhancedMarkdown == nil {
+                topFormattingToolbar
+            }
+            DosaMarkdownEditor(
+                text: note.manualText,
+                isEditable: current.enhancedMarkdown == nil,
+                highlight: editorHighlight,
+                bottomContentInset: Self.barBottomInset,
+                documentId: "\(noteId)-manual",
+                onMediaFileDrop: { requestAudio(.importFile($0)) },
+                onMediaDragChanged: { isDropTargeted = $0 }
+            )
+            .accessibilityLabel(current.enhancedMarkdown == nil ? "My notes, editable" : "My notes, read-only")
+            .padding(.top, 2)
+        }
+    }
+
+    /// Dosa's generated notes, tinted where they differ from the user's own.
+    private func enhancedPane(note: Binding<Note>, current: Note, showsHeader: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if showsHeader {
+                PaneHeader(
+                    title: "Dosa Notes",
+                    systemImage: "sparkles",
+                    copyText: { store.note(id: noteId)?.enhancedMarkdown ?? "" }
+                )
+                Divider()
+            }
+            HStack(spacing: 14) {
+                Label("Your notes", systemImage: "circle.fill")
+                    .appFont(size: 13)
+                    .foregroundStyle(.primary)
+                Label("Dosa additions", systemImage: "circle.fill")
+                    .appFont(size: 13)
+                    .foregroundStyle(DiffEngine.aiColor)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 7)
+            .padding(.bottom, 7)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Legend: your notes shown in the default color, Dosa's additions tinted")
+            topFormattingToolbar
+            DosaMarkdownEditor(
+                text: enhancedBinding(note: note),
+                diffAgainst: current.manualText,
+                highlight: editorHighlight,
+                bottomContentInset: Self.barBottomInset,
+                documentId: "\(noteId)-enhanced",
+                onMediaFileDrop: { requestAudio(.importFile($0)) },
+                onMediaDragChanged: { isDropTargeted = $0 }
+            )
+            .accessibilityLabel("Dosa notes, editable")
+        }
+    }
+
+    /// Interview mode's right-hand pane in Dosa Notes: the candidate scored per
+    /// question against the rubric. Editable, so scores and reasons can be
+    /// adjusted before export. Offers Retry Scoring when the scoring call failed.
+    private func scorecardPane(note: Binding<Note>, current: Note) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaneHeader(
+                title: "Dosa Scorecard",
+                systemImage: "checkmark.seal",
+                copyText: { store.note(id: noteId)?.scorecardMarkdown ?? "" }
+            )
+            Divider()
+            if current.scorecardMarkdown != nil {
+                DosaMarkdownEditor(
+                    text: scorecardBinding(note: note),
+                    highlight: scorecardHighlight,
+                    bottomContentInset: Self.barBottomInset,
+                    documentId: "\(noteId)-scorecard"
+                )
+                .accessibilityLabel("Dosa scorecard, editable")
+            } else if generator.activeNoteId == noteId {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Scoring against the rubric…")
+                        .appFont(.callout)
+                        .foregroundStyle(Theme.secondaryTextColor)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(spacing: 10) {
+                    Text("The scorecard couldn't be generated.")
+                        .appFont(.callout)
+                        .foregroundStyle(Theme.secondaryTextColor)
+                    Button("Retry Scoring", action: retryScoring)
+                        .disabled(generator.phase != .idle || current.transcript == nil)
+                        .help(current.transcript == nil
+                              ? "There's no transcript to score — re-transcribe the recording first"
+                              : "Score the candidate against the rubric again")
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Theme.current.editorBackgroundColor)
     }
 
     /// The formatting strip, when the user keeps it above the editor. The
@@ -336,6 +434,13 @@ struct NoteEditorView: View {
         Binding(
             get: { note.wrappedValue.enhancedMarkdown ?? "" },
             set: { note.wrappedValue.enhancedMarkdown = $0 }
+        )
+    }
+
+    private func scorecardBinding(note: Binding<Note>) -> Binding<String> {
+        Binding(
+            get: { note.wrappedValue.scorecardMarkdown ?? "" },
+            set: { note.wrappedValue.scorecardMarkdown = $0 }
         )
     }
 
@@ -627,6 +732,9 @@ struct NoteEditorView: View {
         case .enhanced:
             viewMode = .aiNotes
             editorHighlight = TextHighlight(id: reveal.id, range: range)
+        case .scorecard:
+            viewMode = .aiNotes
+            scorecardHighlight = TextHighlight(id: reveal.id, range: range)
         case .transcript:
             transcriptHighlight = TextHighlight(id: reveal.id, range: range)
             showTranscript = true
@@ -748,17 +856,33 @@ struct NoteEditorView: View {
                 }
             }
             Divider()
-            Menu {
-                ForEach(templates.templates) { template in
-                    Button(template.name) { store.applyTemplate(template, to: noteId) }
+            if current.isInterview {
+                if current.enhancedMarkdown == nil {
+                    Button {
+                        interviewSheet = .edit
+                    } label: {
+                        Label("Edit Interview Doc…", systemImage: "checklist")
+                    }
+                    .help("Change the questions/rubric doc Dosa shows beside your notes and scores against")
                 }
-            } label: {
-                Label("Apply Template", systemImage: "list.bullet.rectangle")
+                Toggle(isOn: Binding(
+                    get: { current.exportsScorecard },
+                    set: { store.setIncludeScorecardInExport(noteId: noteId, $0) }
+                )) {
+                    Label("Include Scorecard in Exports", systemImage: "checkmark.seal")
+                }
+                .disabled(current.scorecardMarkdown == nil)
+                .help(current.scorecardMarkdown == nil
+                      ? "The scorecard appears after you generate notes"
+                      : "Adds Dosa's scorecard after the notes in Export Notes and in Notion")
+            } else if current.enhancedMarkdown == nil, !isRecordingThisNote, !isSavingThisNote {
+                Button {
+                    interviewSheet = .convert
+                } label: {
+                    Label("Switch to Interview Mode…", systemImage: "person.2")
+                }
+                .help("Add your interview questions and rubric; Dosa scores the candidate after the interview")
             }
-            .disabled(current.enhancedMarkdown != nil || templates.templates.isEmpty)
-            .help(current.enhancedMarkdown != nil
-                  ? "Notes have already been generated — manual notes are read-only"
-                  : "Add a template's sections to this note and tell the AI what kind of meeting it is")
             Button(action: startImport) {
                 Label("Import Audio or Video…", systemImage: "square.and.arrow.down")
             }
@@ -984,7 +1108,7 @@ struct NoteEditorView: View {
 
     private func generate() {
         let task = Task {
-            await generator.run(noteId: noteId, store: store, notifier: notifier)
+            await generator.runManual(noteId: noteId, store: store, notifier: notifier)
             if generator.errorMessage == nil, !Task.isCancelled,
                store.note(id: noteId)?.enhancedMarkdown != nil {
                 viewMode = .aiNotes
@@ -993,8 +1117,30 @@ struct NoteEditorView: View {
         generator.register(task)
     }
 
+    private func retryScoring() {
+        let task = Task {
+            await generator.runScoring(noteId: noteId, store: store, notifier: notifier)
+        }
+        generator.register(task)
+    }
+
+    private func interviewSetupSheet(mode: InterviewSetupSheet.Mode, current: Note) -> some View {
+        InterviewSetupSheet(
+            mode: mode,
+            initialDoc: mode == .edit ? (current.interview?.sourceDoc ?? "") : "",
+            initialFileName: mode == .edit ? current.interview?.sourceFileName : nil
+        ) { setup in
+            if mode == .edit {
+                store.updateInterviewDoc(id: noteId, doc: setup.sourceDoc, fileName: setup.sourceFileName)
+            } else {
+                store.convertToInterview(id: noteId, setup: setup)
+                viewMode = .myNotes
+            }
+        }
+    }
+
     private func exportNotes(_ note: Note) {
-        let body = note.enhancedMarkdown ?? note.manualText
+        let body = InterviewDocument.exportBody(for: note)
         let markdown = """
         # \(note.displayTitle)
 
