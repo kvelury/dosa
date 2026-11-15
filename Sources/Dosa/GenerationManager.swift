@@ -287,10 +287,22 @@ final class GenerationManager: ObservableObject {
     /// failed (or that the user wants re-scored after editing the rubric).
     func runScoring(noteId: UUID, store: NotesStore, notifier: NotificationManager) async {
         await performScoring(noteId: noteId, store: store, notifier: notifier)
-        // A recording that finished while scoring ran was queued by
-        // `enqueueAutomatic`, whose `drain` bailed on `phase != .idle`; nothing
-        // else would start it. `phase` is idle again here (the `defer` in
-        // `performScoring` has run). Stop means stop, as in `drain`.
+        resumeQueue(store: store, notifier: notifier)
+    }
+
+    /// Generate Notes / Re-transcribe & Regenerate: a run someone started by
+    /// hand, followed by any automatic work that queued up behind it.
+    func runManual(noteId: UUID, store: NotesStore, notifier: NotificationManager) async {
+        await run(noteId: noteId, store: store, notifier: notifier)
+        resumeQueue(store: store, notifier: notifier)
+    }
+
+    /// Called when a run started outside `drain` (manual Generate, Retry
+    /// Scoring) finishes. A recording stopped meanwhile was queued by
+    /// `enqueueAutomatic`, whose `drain` bailed on `phase != .idle`, and
+    /// nothing else would start it. `phase` is idle again by now (the run's
+    /// `defer` has fired). Stop means stop, as in `drain`.
+    private func resumeQueue(store: NotesStore, notifier: NotificationManager) {
         guard !Task.isCancelled else {
             queue.removeAll()
             return

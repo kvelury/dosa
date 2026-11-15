@@ -1108,7 +1108,7 @@ struct NoteEditorView: View {
 
     private func generate() {
         let task = Task {
-            await generator.run(noteId: noteId, store: store, notifier: notifier)
+            await generator.runManual(noteId: noteId, store: store, notifier: notifier)
             if generator.errorMessage == nil, !Task.isCancelled,
                store.note(id: noteId)?.enhancedMarkdown != nil {
                 viewMode = .aiNotes
